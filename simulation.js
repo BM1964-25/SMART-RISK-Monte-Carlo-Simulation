@@ -1,5 +1,5 @@
-import { evaluateFormula, createFormulaContext } from "./formula.js";
-import { getModelTemplate } from "./models.js";
+import { evaluateFormula, createFormulaContext, createFormulaPlaceholderKey } from "./formula.js?v=20260508-1";
+import { getModelTemplate } from "./models.js?v=20260508-1";
 
 export function runMonteCarlo(state, scenarioId) {
   const scenario = resolveScenario(state, scenarioId);
@@ -8,6 +8,14 @@ export function runMonteCarlo(state, scenarioId) {
   const model = resolveModel(state);
   const parameters = (state.parameters || []).filter(isActiveItem);
   const risks = (state.risks || []).filter(isActiveItem);
+
+  const usedTokens = new Set();
+  const parameterTokens = parameters.map((parameter, index) => ({
+    token: createFormulaPlaceholderKey(parameter.id || parameter.label || `PAR_${index + 1}`, "PAR", usedTokens)
+  }));
+  const riskTokens = risks.map((risk, index) => ({
+    token: createFormulaPlaceholderKey(risk.riskId || risk.id || risk.label || `RISK_${index + 1}`, "RISK", usedTokens)
+  }));
 
   const driverNames = [];
   const driverSeries = [];
@@ -26,27 +34,50 @@ export function runMonteCarlo(state, scenarioId) {
   const timeSeries = [];
   const records = [];
   let hasTimeEffect = false;
-  const formulaError = validateModelFormula(model);
+  const formulaError = validateModelFormula(model, parameterTokens, riskTokens, parameters, risks);
+  const templateDefinition = getModelTemplate(model.templateId || "custom");
 
   for (let i = 0; i < iterations; i += 1) {
     let paramSum = 0;
     let riskCost = 0;
     let totalTime = 0;
     let driverIndex = 0;
+    const context = createFormulaContext({
+      BASE_VALUE: model.baseValue,
+      PARAM_SUM: 0,
+      RISK_COST: 0,
+      RISK_TIME: 0,
+      ANNUAL_INCOME: model.annualIncome,
+      ANNUAL_COST: model.annualCost,
+      ANNUAL_CASHFLOW: model.annualCashflow,
+      CAP_RATE: model.capRate,
+      RESIDUAL_VALUE: model.residualValue,
+      DISCOUNT_RATE: model.discountRate,
+      HOLDING_PERIOD: model.holdingPeriod
+    });
+    for (const fieldDef of templateDefinition.fields || []) {
+      const token = fieldDef.token || fieldDef.label || fieldDef.key;
+      const numeric = toNumber(model?.[fieldDef.key]);
+      context[token] = Number.isFinite(numeric) ? numeric : (fieldDef.defaultValue ?? 0);
+    }
 
-    for (const parameter of parameters) {
+    for (let index = 0; index < parameters.length; index += 1) {
+      const parameter = parameters[index];
       const sampled = sampleParameter(parameter, scenario.parameterMultiplier);
       const numeric = toNumber(sampled);
       if (isFinite(numeric)) {
         paramSum += numeric;
         driverSeries[driverIndex].push(numeric);
+        context[parameterTokens[index].token] = numeric;
       } else {
         driverSeries[driverIndex].push(0);
+        context[parameterTokens[index].token] = 0;
       }
       driverIndex += 1;
     }
 
-    for (const risk of risks) {
+    for (let index = 0; index < risks.length; index += 1) {
+      const risk = risks[index];
       const probability = clamp(toNumber(risk.probability) * scenario.riskProbabilityMultiplier, 0, 100);
       let realizedImpact = 0;
       if (Math.random() * 100 < probability) {
@@ -57,22 +88,14 @@ export function runMonteCarlo(state, scenarioId) {
         if (impact.time !== 0) hasTimeEffect = true;
       }
       driverSeries[driverIndex].push(realizedImpact);
+      context[riskTokens[index].token] = realizedImpact;
       driverIndex += 1;
     }
 
-    const context = createFormulaContext({
-      BASE_VALUE: model.baseValue,
-      PARAM_SUM: paramSum,
-      RISK_COST: riskCost,
-      RISK_TIME: totalTime,
-      ANNUAL_INCOME: model.annualIncome,
-      ANNUAL_COST: model.annualCost,
-      ANNUAL_CASHFLOW: model.annualCashflow,
-      CAP_RATE: model.capRate,
-      RESIDUAL_VALUE: model.residualValue,
-      DISCOUNT_RATE: model.discountRate,
-      HOLDING_PERIOD: model.holdingPeriod
-    });
+    context.PARAM_SUM = paramSum;
+    context.RISK_COST = riskCost;
+    context.RISK_TIME = totalTime;
+
     const evaluated = evaluateFormula(model.formula, context);
     const totalValue = evaluated.ok ? evaluated.value : paramSum + riskCost;
 
@@ -248,8 +271,8 @@ function resolveModel(state) {
   };
 }
 
-function validateModelFormula(model) {
-  const result = evaluateFormula(model.formula, createFormulaContext({
+function validateModelFormula(model, parameterTokens = [], riskTokens = [], parameters = [], risks = []) {
+  const context = createFormulaContext({
     BASE_VALUE: model.baseValue,
     PARAM_SUM: 1,
     RISK_COST: 1,
@@ -261,7 +284,24 @@ function validateModelFormula(model) {
     RESIDUAL_VALUE: model.residualValue,
     DISCOUNT_RATE: model.discountRate || 1,
     HOLDING_PERIOD: model.holdingPeriod || 1
-  }));
+  });
+  const templateDefinition = getModelTemplate(model.templateId || "custom");
+  for (const fieldDef of templateDefinition.fields || []) {
+    const token = fieldDef.token || fieldDef.label || fieldDef.key;
+    const numeric = toNumber(model?.[fieldDef.key]);
+    context[token] = Number.isFinite(numeric) ? numeric : (fieldDef.defaultValue ?? 0);
+  }
+  parameterTokens.forEach((item, index) => {
+    const parameter = parameters[index];
+    context[item.token] = toNumber(parameter?.mode ?? parameter?.min ?? parameter?.max ?? 1) || 1;
+  });
+  riskTokens.forEach((item, index) => {
+    const risk = risks[index];
+    const probability = clamp(toNumber(risk?.probability ?? 0), 0, 100);
+    const impact = toNumber(risk?.modeImpact ?? risk?.minImpact ?? risk?.maxImpact ?? 1) || 1;
+    context[item.token] = ((probability / 100) * impact) || 1;
+  });
+  const result = evaluateFormula(model.formula, context);
   return result.ok ? { ok: true, error: "" } : { ok: false, error: result.error };
 }
 
