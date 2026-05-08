@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>SMART RISK Monte-Carlo-Simulation</title>
   <link rel="stylesheet" href="styles.css" />
-  <script type="module" src="app.js"></script>
+  <script type="module" src="app.js?v=20260508-1"></script>
 </head>
 <body>
   <div class="app-shell">
@@ -67,6 +67,10 @@
         </div>
       </section>
 
+      <section class="workflow-rail card">
+        <div id="workflow-steps" class="workflow-stepper"></div>
+      </section>
+
       <main class="main-grid">
         <section class="view-section active" data-section="dashboard">
           <div class="section-header">
@@ -118,8 +122,8 @@
               <p>Erfasse beliebig viele Treiber mit Verteilungsannahmen und Aktivierungsstatus.</p>
             </div>
             <div class="action-row">
-              <button class="btn btn-secondary" data-action="add-parameter-template">Vorlage hinzufügen</button>
-              <button class="btn btn-primary" data-action="add-parameter">Parameter hinzufügen</button>
+              <button class="btn btn-secondary" data-action="add-parameter-template">Beispielparameter hinzufügen</button>
+              <button class="btn btn-primary" data-action="add-parameter">Leeren Parameter hinzufügen</button>
             </div>
           </div>
           <div class="card table-card">
@@ -134,8 +138,8 @@
               <p>Einzelrisiken mit Eintrittswahrscheinlichkeit und Wirkungsbandbreite.</p>
             </div>
             <div class="action-row">
-              <button class="btn btn-secondary" data-action="add-risk-template">Vorlage hinzufügen</button>
-              <button class="btn btn-primary" data-action="add-risk">Risiko hinzufügen</button>
+              <button class="btn btn-secondary" data-action="add-risk-template">Beispielrisiko hinzufügen</button>
+              <button class="btn btn-primary" data-action="add-risk">Leeres Risiko hinzufügen</button>
             </div>
           </div>
           <div class="card table-card">
