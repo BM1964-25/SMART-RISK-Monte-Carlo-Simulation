@@ -49,6 +49,32 @@ export function createFormulaContext(values = {}) {
   return context;
 }
 
+export function createFormulaPlaceholderKey(value, fallbackPrefix = "TOKEN", usedTokens = null) {
+  const source = String(value ?? "").trim();
+  const cleaned = source
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/ß/g, "ss")
+    .replace(/[^A-Za-z0-9_]+/g, "_")
+    .replace(/_{2,}/g, "_")
+    .replace(/^_+|_+$/g, "");
+  let key = cleaned || String(fallbackPrefix || "TOKEN").trim() || "TOKEN";
+  if (/^[0-9]/.test(key)) {
+    key = `${fallbackPrefix || "TOKEN"}_${key}`;
+  }
+  if (usedTokens instanceof Set) {
+    let uniqueKey = key;
+    let suffix = 2;
+    while (usedTokens.has(uniqueKey)) {
+      uniqueKey = `${key}_${suffix}`;
+      suffix += 1;
+    }
+    usedTokens.add(uniqueKey);
+    return uniqueKey;
+  }
+  return key;
+}
+
 function evaluateNode(node, context) {
   switch (node.type) {
     case "number":
