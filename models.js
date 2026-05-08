@@ -54,133 +54,210 @@ export const MODEL_TEMPLATES = [
     name: "Eigene Formel erstellen",
     outputLabel: "Ergebnis",
     description: "Freie Modellvorlage für eigene fachliche Formeln und Spezialfälle.",
-    formula: ""
+    formula: "",
+    fields: []
   },
   {
     id: "cost",
     name: "Kosten- / Budgetmodell",
     outputLabel: "Gesamtwert",
     description: "Summiert Budget, aktive Parameter und Risiken zu einer Kostenverteilung.",
-    formula: "Basiswert + SummeAktiverParameter + Risikokosten"
+    formula: "Basiswert + SummeAktiverParameter + Risikokosten",
+    fields: [
+      { key: "baseValue", token: "Basiswert", label: "Basiswert", help: "Z. B. Bodenwert, Kaufpreis oder Basisbudget", type: "number", defaultValue: 0 }
+    ]
   },
   {
     id: "din276",
     name: "Basiskosten nach DIN 276",
     outputLabel: "Basiskosten",
     description: "Aggregiert die Kostengruppen 100 bis 800 zu einer DIN-276-Basiskostenbasis.",
-    formula: "KG100 + KG200 + KG300 + KG400 + KG500 + KG600 + KG700 + KG800"
+    formula: "KG100 + KG200 + KG300 + KG400 + KG500 + KG600 + KG700 + KG800",
+    fields: []
   },
   {
     id: "budget",
     name: "Gesamtbudget",
     outputLabel: "Projektbudget",
     description: "Verbindet Basiskosten und separat simulierte Risiken zum Projektbudget.",
-    formula: "Basiskosten + Gesamtrisiko"
+    formula: "Basiskosten + Gesamtrisiko",
+    fields: []
   },
   {
     id: "yield",
     name: "Ertragswertverfahren",
     outputLabel: "Ertragswert",
     description: "Leitet einen Ertragswert aus Nettoertrag, Kapitalisierungszins und Restwert ab.",
-    formula: "((Jahresertrag - Jahreskosten) / Kapitalisierungszinssatz) + Restwert - Risikokosten"
+    formula: "((Jahresertrag - Jahreskosten) / Kapitalisierungszinssatz) + Restwert - Risikokosten",
+    fields: [
+      { key: "annualIncome", token: "Jahresertrag", label: "Jahresertrag", help: "Jährliche Einnahmen oder Nettoertrag", type: "number", defaultValue: 0 },
+      { key: "annualCost", token: "Jahreskosten", label: "Jahreskosten", help: "Laufende Kosten oder Bewirtschaftung", type: "number", defaultValue: 0 },
+      { key: "capRate", token: "Kapitalisierungszinssatz", label: "Kapitalisierungszins", help: "z. B. 0,05", type: "number", defaultValue: 0.05 },
+      { key: "residualValue", token: "Restwert", label: "Restwert", help: "Verkaufserlös oder Exit-Wert", type: "number", defaultValue: 0 }
+    ]
   },
   {
     id: "cashflow",
     name: "Cashflow-Modell",
     outputLabel: "Cashflow",
     description: "Bilden den laufenden Netto-Cashflow aus Einnahmen und Kosten ab.",
-    formula: "Einnahmen - Betriebskosten - Finanzierungskosten"
+    formula: "Einnahmen - Betriebskosten - Finanzierungskosten",
+    fields: [
+      { key: "income", token: "Einnahmen", label: "Einnahmen", help: "Laufende Erlöse oder Mieterträge", type: "number", defaultValue: 0 },
+      { key: "operatingCosts", token: "Betriebskosten", label: "Betriebskosten", help: "Laufende Aufwendungen", type: "number", defaultValue: 0 },
+      { key: "financingCosts", token: "Finanzierungskosten", label: "Finanzierungskosten", help: "Zins- und Finanzierungskosten", type: "number", defaultValue: 0 }
+    ]
   },
   {
     id: "dcf",
     name: "DCF- / Barwertmodell",
     outputLabel: "Barwert",
     description: "Diskontiert wiederkehrende Cashflows über eine definierte Haltedauer.",
-    formula: "Basiswert + (JahresCashflow * (1 - (1 + Diskontierungszins) ^ (-Haltedauer)) / Diskontierungszins) + Restwert - Risikokosten"
+    formula: "Basiswert + (JahresCashflow * (1 - (1 + Diskontierungszins) ^ (-Haltedauer)) / Diskontierungszins) + Restwert - Risikokosten",
+    fields: [
+      { key: "baseValue", token: "Basiswert", label: "Basiswert", help: "Ausgangswert oder Anfangsinvestition", type: "number", defaultValue: 0 },
+      { key: "annualCashflow", token: "JahresCashflow", label: "Jahres-Cashflow", help: "Jährlicher Netto-Cashflow", type: "number", defaultValue: 0 },
+      { key: "discountRate", token: "Diskontierungszins", label: "Diskontierungszins", help: "z. B. 0,05", type: "number", defaultValue: 0.05 },
+      { key: "holdingPeriod", token: "Haltedauer", label: "Haltedauer", help: "Jahre", type: "number", defaultValue: 10 },
+      { key: "residualValue", token: "Restwert", label: "Restwert", help: "Verkaufserlös oder Exit-Wert", type: "number", defaultValue: 0 }
+    ]
   },
   {
     id: "npv",
     name: "Kapitalwert / NPV",
     outputLabel: "Barwert",
     description: "Ermittelt den Barwert der abgezinsten Zahlungsströme abzüglich Anfangsinvestition.",
-    formula: "SummeAktiverParameter + (JahresCashflow / (1 + Diskontierungszins) ^ Haltedauer) - Investition"
+    formula: "SummeAktiverParameter + (JahresCashflow / (1 + Diskontierungszins) ^ Haltedauer) - Investition",
+    fields: [
+      { key: "annualCashflow", token: "JahresCashflow", label: "Jahres-Cashflow", help: "Netto-Zahlungsstrom pro Jahr", type: "number", defaultValue: 0 },
+      { key: "discountRate", token: "Diskontierungszins", label: "Diskontierungszins", help: "z. B. 0,05", type: "number", defaultValue: 0.05 },
+      { key: "holdingPeriod", token: "Haltedauer", label: "Haltedauer", help: "Jahre", type: "number", defaultValue: 10 },
+      { key: "investment", token: "Investition", label: "Investition", help: "Anfangsinvestition", type: "number", defaultValue: 0 }
+    ]
   },
   {
     id: "roi",
     name: "ROI-Modell",
     outputLabel: "ROI",
     description: "Setzt Gewinn und Investition ins Verhältnis und zeigt die Rendite in Prozent.",
-    formula: "(Gewinn / Investition) * 100"
+    formula: "(Gewinn / Investition) * 100",
+    fields: [
+      { key: "profit", token: "Gewinn", label: "Gewinn", help: "Erwarteter Gewinn oder Überschuss", type: "number", defaultValue: 0 },
+      { key: "investment", token: "Investition", label: "Investition", help: "Eingesetztes Kapital", type: "number", defaultValue: 0 }
+    ]
   },
   {
     id: "hybrid",
     name: "Hybridmodell",
     outputLabel: "Gesamtwert",
     description: "Kombiniert Kosten-, Ertrags- und Risikotreiber in einer kompakten Logik.",
-    formula: "Basiswert + SummeAktiverParameter + (JahresCashflow / Kapitalisierungszinssatz) + Restwert - Risikokosten"
+    formula: "Basiswert + SummeAktiverParameter + (JahresCashflow / Kapitalisierungszinssatz) + Restwert - Risikokosten",
+    fields: [
+      { key: "baseValue", token: "Basiswert", label: "Basiswert", help: "Ausgangswert oder Budgetbasis", type: "number", defaultValue: 0 },
+      { key: "annualCashflow", token: "JahresCashflow", label: "Jahres-Cashflow", help: "Jährlicher Netto-Cashflow", type: "number", defaultValue: 0 },
+      { key: "capRate", token: "Kapitalisierungszinssatz", label: "Kapitalisierungszins", help: "z. B. 0,05", type: "number", defaultValue: 0.05 },
+      { key: "residualValue", token: "Restwert", label: "Restwert", help: "Verkaufserlös oder Exit-Wert", type: "number", defaultValue: 0 }
+    ]
   },
   {
     id: "total-costs",
     name: "Gesamtkostenmodell",
     outputLabel: "Gesamtkosten",
     description: "Fasst die wesentlichen Kostenblöcke zu einer Gesamtkostenperspektive zusammen.",
-    formula: "Gesamtkosten = KG300 + KG400 + KG500 + Baunebenkosten + Risiken"
+    formula: "Gesamtkosten = KG300 + KG400 + KG500 + Baunebenkosten + Risiken",
+    fields: []
   },
   {
     id: "risk-costs",
     name: "Risikokostenmodell",
     outputLabel: "Gesamtrisiko",
     description: "Simuliert Risiken separat und zeigt die Summe der Einzelrisiken an.",
-    formula: "Gesamtrisiko = Risiko_i"
+    formula: "Gesamtrisiko = Risiko_i",
+    fields: []
   },
   {
     id: "risk-value",
     name: "Risikowert",
     outputLabel: "Risikowert",
     description: "Gewichtet Risiken über Eintrittswahrscheinlichkeit und Schadenshöhe.",
-    formula: "Risikowert = Eintrittswahrscheinlichkeit * Schadenshoehe"
+    formula: "Risikowert = Eintrittswahrscheinlichkeit * Schadenshoehe",
+    fields: [
+      { key: "probability", token: "Eintrittswahrscheinlichkeit", label: "Eintrittswahrscheinlichkeit", help: "In Prozent", type: "number", defaultValue: 0 },
+      { key: "damage", token: "Schadenshoehe", label: "Schadenshöhe", help: "Kosten- oder Zeitwirkung", type: "number", defaultValue: 0 }
+    ]
   },
   {
     id: "lcc",
     name: "Lebenszykluskosten",
     outputLabel: "LCC",
     description: "Betrachtet Investition, Betrieb, Instandhaltung und Rückbau über den Lebenszyklus.",
-    formula: "LCC = Investition + Betrieb + Instandhaltung + Rueckbau"
+    formula: "LCC = Investition + Betrieb + Instandhaltung + Rueckbau",
+    fields: [
+      { key: "investment", token: "Investition", label: "Investition", help: "Anfangsinvestition", type: "number", defaultValue: 0 },
+      { key: "operatingCosts", token: "Betrieb", label: "Betrieb", help: "Laufender Betrieb", type: "number", defaultValue: 0 },
+      { key: "maintenanceCosts", token: "Instandhaltung", label: "Instandhaltung", help: "Wartung und Instandsetzung", type: "number", defaultValue: 0 },
+      { key: "demolitionCosts", token: "Rueckbau", label: "Rückbau", help: "Rückbau- oder Entsorgungskosten", type: "number", defaultValue: 0 }
+    ]
   },
   {
     id: "schedule",
     name: "Terminmodell",
     outputLabel: "Gesamttermin",
     description: "Aggregiert die Projektphasen Planung, Vergabe, Bau und Inbetriebnahme.",
-    formula: "Gesamttermin = Planung + Vergabe + Bau + Inbetriebnahme"
+    formula: "Gesamttermin = Planung + Vergabe + Bau + Inbetriebnahme",
+    fields: [
+      { key: "planning", token: "Planung", label: "Planung", help: "Dauer der Planungsphase", type: "number", defaultValue: 0 },
+      { key: "procurement", token: "Vergabe", label: "Vergabe", help: "Dauer der Vergabe", type: "number", defaultValue: 0 },
+      { key: "construction", token: "Bau", label: "Bau", help: "Dauer der Bauphase", type: "number", defaultValue: 0 },
+      { key: "commissioning", token: "Inbetriebnahme", label: "Inbetriebnahme", help: "Dauer der Inbetriebnahme", type: "number", defaultValue: 0 }
+    ]
   },
   {
     id: "rent",
     name: "Mieterlösmodell",
     outputLabel: "Mietertrag",
     description: "Leitet den Mietertrag aus Fläche, Mietpreis und Vermietungsquote ab.",
-    formula: "Mietertrag = Flaeche * Mietpreis * Vermietungsquote"
+    formula: "Mietertrag = Flaeche * Mietpreis * Vermietungsquote",
+    fields: [
+      { key: "area", token: "Flaeche", label: "Fläche", help: "Vermietbare Fläche", type: "number", defaultValue: 0 },
+      { key: "rentPrice", token: "Mietpreis", label: "Mietpreis", help: "Preis pro Einheit", type: "number", defaultValue: 0 },
+      { key: "vacancyRate", token: "Vermietungsquote", label: "Vermietungsquote", help: "Anteil vermietet", type: "number", defaultValue: 1 }
+    ]
   },
   {
     id: "asset-value",
     name: "Immobilienwertmodell",
     outputLabel: "Immobilienwert",
     description: "Setzt die Jahresnettomiete mit einem Vervielfältiger ins Verhältnis.",
-    formula: "Immobilienwert = Jahresnettomiete * Vervielfaeltiger"
+    formula: "Immobilienwert = Jahresnettomiete * Vervielfaeltiger",
+    fields: [
+      { key: "annualNetRent", token: "Jahresnettomiete", label: "Jahresnettomiete", help: "Jährliche Nettomiete", type: "number", defaultValue: 0 },
+      { key: "multiplier", token: "Vervielfaeltiger", label: "Vervielfältiger", help: "Ertragsfaktor", type: "number", defaultValue: 0 }
+    ]
   },
   {
     id: "inflation",
     name: "Inflation / Preissteigerung",
     outputLabel: "Zukunftskosten",
     description: "Schreibt Kosten über einen Zeitraum mit einer Wachstumsrate fort.",
-    formula: "Zukunftskosten = Kosten_0 * (1 + i) ^ n"
+    formula: "Zukunftskosten = Kosten_0 * (1 + i) ^ n",
+    fields: [
+      { key: "initialCosts", token: "Kosten_0", label: "Kosten 0", help: "Ausgangskosten", type: "number", defaultValue: 0 },
+      { key: "inflationRate", token: "i", label: "i", help: "Preissteigerung / Inflation", type: "number", defaultValue: 0 },
+      { key: "years", token: "n", label: "n", help: "Anzahl Jahre", type: "number", defaultValue: 0 }
+    ]
   },
   {
     id: "financing",
     name: "Finanzierungskosten",
     outputLabel: "Zinskosten",
     description: "Leitet Finanzierungskosten aus Kapital, Zinssatz und Laufzeit ab.",
-    formula: "Zinskosten = Kapital * Zinssatz * Laufzeit"
+    formula: "Zinskosten = Kapital * Zinssatz * Laufzeit",
+    fields: [
+      { key: "capital", token: "Kapital", label: "Kapital", help: "Eingesetztes Fremd- oder Eigenkapital", type: "number", defaultValue: 0 },
+      { key: "interestRate", token: "Zinssatz", label: "Zinssatz", help: "z. B. 0,05", type: "number", defaultValue: 0.05 },
+      { key: "term", token: "Laufzeit", label: "Laufzeit", help: "Zeitraum in Jahren", type: "number", defaultValue: 0 }
+    ]
   }
 ];
 
