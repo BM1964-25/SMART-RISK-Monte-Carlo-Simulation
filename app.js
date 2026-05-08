@@ -1,8 +1,8 @@
-import { loadState, saveState, clearState } from "./storage.js";
-import { runMonteCarlo, compareScenarios, buildHistogram, formatNumber, percentile } from "./simulation.js";
-import { exportStateAsJson, exportResultsAsCsv, downloadTemplate } from "./export.js";
-import { MODEL_TEMPLATES, FORMULA_TOKENS, getModelTemplate } from "./models.js";
-import { validateFormula, localizeFormula } from "./formula.js";
+import { loadState, saveState, clearState } from "./storage.js?v=20260508-1";
+import { runMonteCarlo, compareScenarios, buildHistogram, formatNumber, percentile } from "./simulation.js?v=20260508-1";
+import { exportStateAsJson, exportResultsAsCsv, downloadTemplate } from "./export.js?v=20260508-1";
+import { MODEL_TEMPLATES, FORMULA_TOKENS, FORMULA_LIBRARY_GROUPS, getModelTemplate } from "./models.js?v=20260508-1";
+import { validateFormula, localizeFormula, createFormulaPlaceholderKey } from "./formula.js?v=20260508-1";
 
 const STORAGE_BASENAME = "smart-risk-monte-carlo";
 
@@ -40,6 +40,7 @@ function cacheElements() {
   elements.runStatus = document.getElementById("run-status");
   elements.dashboardMetrics = document.getElementById("dashboard-metrics");
   elements.decisionCallout = document.getElementById("decision-callout");
+  elements.workflowSteps = document.getElementById("workflow-steps");
   elements.projectForm = document.getElementById("project-form");
   elements.parametersTable = document.getElementById("parameters-table");
   elements.risksTable = document.getElementById("risks-table");
@@ -120,6 +121,9 @@ function handleClick(event) {
       break;
     case "apply-model-template":
       applyModelTemplate(action.dataset.modelTemplate);
+      break;
+    case "sync-model-parameters":
+      syncModelFieldsToParameters();
       break;
     case "save-custom-formula":
       saveCustomFormula();
@@ -285,7 +289,7 @@ function updateCollectionItem(collection, id, field, target, shouldRender = true
 function coerceValue(field, value, target) {
   if (target.type === "checkbox") return Boolean(value);
   if (target.type === "number" || ["min", "mode", "max", "probability", "minImpact", "modeImpact", "maxImpact", "timeImpact", "parameterMultiplier", "riskProbabilityMultiplier", "riskImpactMultiplier", "iterations", "budget"].includes(field)) {
-    return value === "" ? "" : Number(value);
+    return value === "" ? "" : toNumeric(value);
   }
   return value;
 }
@@ -293,7 +297,7 @@ function coerceValue(field, value, target) {
 function coerceStateValue(path, value, target) {
   if (target.type === "checkbox") return Boolean(value);
   if (["settings.iterations", "settings.budget"].includes(path)) {
-    return value === "" ? 0 : Number(value);
+    return value === "" ? 0 : toNumeric(value);
   }
   return value;
 }
@@ -369,11 +373,36 @@ function renderAll() {
   applySidebarState();
   renderHeader();
   renderProjectForm();
-  renderModelSection();
+  try {
+    renderModelSection();
+  } catch (error) {
+    console.error("renderModelSection failed", error);
+    if (elements.modelForm) {
+      elements.modelForm.innerHTML = `
+        <div class="formula-preview status-red">
+          <strong>Fachinhalte konnten nicht geladen werden</strong>
+          <span>${escapeHtml(error?.message || "Unbekannter Fehler beim Rendern der Modellsektion.")}</span>
+        </div>
+      `;
+    }
+  }
   renderParameterTable();
   renderRiskTable();
   renderSimulationForm();
   renderDashboard();
+  try {
+    renderWorkflow();
+  } catch (error) {
+    console.error("renderWorkflow failed", error);
+    if (elements.workflowSteps) {
+      elements.workflowSteps.innerHTML = `
+        <div class="formula-preview status-red" style="grid-column: 1 / -1;">
+          <strong>Prozessleiste konnte nicht geladen werden</strong>
+          <span>${escapeHtml(error?.message || "Unbekannter Fehler beim Rendern der Ablaufleiste.")}</span>
+        </div>
+      `;
+    }
+  }
   renderAnalysis();
   renderSensitivity();
   renderScenarioCards();
@@ -411,6 +440,54 @@ function renderDashboard() {
       ${recommendation.points.map((point) => `<li>${point}</li>`).join("")}
     </ul>
   `;
+}
+
+function renderWorkflow() {
+  if (!elements.workflowSteps) return;
+  const steps = buildWorkflowSteps();
+  elements.workflowSteps.innerHTML = steps.map((step, index) => {
+    const classes = ["workflow-stepper-item"];
+    if (step.completed) classes.push("is-complete");
+    if (step.active) classes.push("is-active");
+    return `
+      <article class="${classes.join(" ")}">
+        <div class="workflow-stepper-index">${index + 1}</div>
+        <div class="workflow-stepper-label">${escapeHtml(step.label)}</div>
+      </article>
+    `;
+  }).join("");
+}
+
+function buildWorkflowSteps() {
+  const defaultState = createDefaultState();
+  const projectChanged = ["name", "client", "type", "location", "owner", "date", "description", "scope", "currency", "unit"].some((field) => String(state.project?.[field] ?? "").trim() && String(state.project?.[field] ?? "").trim() !== String(defaultState.project?.[field] ?? "").trim());
+  const model = resolveCurrentModel();
+  const modelValid = Boolean(model.templateId) && validateCurrentFormula(model).ok;
+  const hasParameters = (state.parameters || []).some((item) => item.active !== false);
+  const hasRisks = (state.risks || []).some((item) => item.active !== false);
+  const hasSimulation = Boolean(latestRun);
+  const hasAnalysis = Boolean(latestRun);
+  const hasWorkflowData = {
+    project: projectChanged,
+    model: modelValid,
+    parameters: hasParameters,
+    risks: hasRisks,
+    simulation: hasSimulation,
+    analysis: hasAnalysis
+  };
+  const steps = [
+    { key: "project", label: "Projektstammdaten" },
+    { key: "model", label: "Bewertungsmodell" },
+    { key: "parameters", label: "Eingangsparameter" },
+    { key: "risks", label: "Risikoregister" },
+    { key: "simulation", label: "Simulation" },
+    { key: "analysis", label: "Ergebnisanalyse" }
+  ];
+  return steps.map((step) => ({
+    ...step,
+    completed: hasWorkflowData[step.key],
+    active: currentView === step.key || (currentView === "dashboard" && step.key === "project")
+  }));
 }
 
 function dashboardMetrics() {
@@ -498,33 +575,97 @@ function renderProjectForm() {
 function renderModelSection() {
   if (!elements.modelForm) return;
   const model = resolveCurrentModel();
-  const validation = validateCurrentFormula(model);
-  const tokenButtons = FORMULA_TOKENS.map((token) => {
+  const templateDefinition = getModelTemplate(model.templateId || "custom");
+  const templateFields = Array.isArray(templateDefinition.fields) ? templateDefinition.fields : [];
+  let validation = { ok: false, error: "" };
+  try {
+    validation = validateCurrentFormula(model);
+  } catch (error) {
+    validation = { ok: false, error: error?.message || "Formel konnte nicht geprüft werden." };
+  }
+
+  let tokenGroups = { staticTokens: FORMULA_TOKENS, parameters: [], risks: [] };
+  try {
+    tokenGroups = buildModelTokenGroups(model.formula);
+  } catch (error) {
+    console.error("buildModelTokenGroups failed", error);
+  }
+
+  const renderTokenButton = (token, extraClass = "") => {
     const active = isTokenActiveInExpression(model.formula, token.token);
-    return `<button class="chip ${active ? "is-active" : ""}" data-action="insert-token" data-token="${token.token}" title="${escapeAttr(token.label)}">${escapeHtml(token.token)}</button>`;
-  }).join("");
-  const modelLibraryCards = MODEL_TEMPLATES.map((template) => `
-    <button class="model-library-card ${template.id === model.templateId ? "is-active" : ""}" type="button" data-action="apply-model-template" data-model-template="${escapeAttr(template.id)}">
-      <strong>${escapeHtml(template.name)}</strong>
-      <span>${escapeHtml(template.outputLabel)}</span>
-      <code>${escapeHtml(template.formula)}</code>
-      <small>${escapeHtml(template.description)}</small>
-    </button>
-  `).join("");
-  const customLibraryCards = (state.model.customLibrary || []).map((item) => `
-    <article class="custom-formula-card">
-      <div>
-        <strong>${escapeHtml(item.name)}</strong>
-        <span>${escapeHtml(item.outputLabel || "Ergebnis")}</span>
-      </div>
-      <code>${escapeHtml(item.formula)}</code>
-      <small>${escapeHtml(item.description || "")}</small>
-      <div class="row-actions">
-        <button class="icon-btn" data-action="load-custom-formula" data-custom-formula-id="${escapeAttr(item.id)}">Laden</button>
-        <button class="icon-btn" data-action="delete-custom-formula" data-custom-formula-id="${escapeAttr(item.id)}">Löschen</button>
-      </div>
-    </article>
-  `).join("");
+    return `<button class="chip ${extraClass} ${active ? "is-active" : ""}" data-action="insert-token" data-token="${escapeAttr(token.token)}" title="${escapeAttr(token.label)}">${escapeHtml(token.token)}</button>`;
+  };
+
+  const staticTokenButtons = (tokenGroups.staticTokens || []).map((token) => renderTokenButton(token)).join("");
+  const activeParameterButtons = (tokenGroups.parameters || []).map((token) => renderTokenButton(token, "chip-parameter")).join("");
+  const activeRiskButtons = (tokenGroups.risks || []).map((token) => renderTokenButton(token, "chip-risk")).join("");
+
+  const templateFieldCards = templateFields.length
+    ? templateFields.map((spec) => {
+      const value = model?.[spec.key];
+      const resolvedValue = Number.isFinite(toNumeric(value)) ? value : (spec.defaultValue ?? "");
+      return field(spec.label, `model.${spec.key}`, resolvedValue, spec.type || "number", spec.help || "");
+    }).join("")
+    : `<div class="field" style="grid-column: 1 / -1;"><div class="field-help">Für dieses Modell sind keine zusätzlichen Eingabewerte erforderlich. Die Formel arbeitet mit den aktiven Platzhaltern und den Daten aus den Registern.</div></div>`;
+
+  let modelLibraryCards = "";
+  try {
+    modelLibraryCards = MODEL_TEMPLATES.map((template) => `
+      <button class="model-library-card ${template.id === model.templateId ? "is-active" : ""}" type="button" data-action="apply-model-template" data-model-template="${escapeAttr(template.id)}">
+        <strong>${escapeHtml(template.name)}</strong>
+        <span>${escapeHtml(template.outputLabel)}</span>
+        <code>${escapeHtml(template.formula)}</code>
+        <small>${escapeHtml(template.description)}</small>
+      </button>
+    `).join("");
+  } catch (error) {
+    console.error("modelLibraryCards failed", error);
+    modelLibraryCards = `<div class="muted">Bewertungsmodelle konnten nicht geladen werden.</div>`;
+  }
+
+  let formulaLibraryHeaders = "";
+  let formulaLibraryItems = "";
+  try {
+    formulaLibraryHeaders = (FORMULA_LIBRARY_GROUPS || []).map((group) => `
+      <article class="formula-library-category">
+        <strong>${escapeHtml(group.title)}</strong>
+        <span>${escapeHtml(`${group.items.length} Modelle`)}</span>
+      </article>
+    `).join("");
+    formulaLibraryItems = (FORMULA_LIBRARY_GROUPS || []).flatMap((group) => group.items || []).map((item) => `
+      <button type="button" class="formula-library-item" data-action="insert-formula" data-formula="${escapeAttr(item.formula)}" title="${escapeAttr(item.note)}">
+        <span class="formula-library-badge">Vorlage</span>
+        <strong>${escapeHtml(item.title)}</strong>
+        <code>${escapeHtml(item.formula)}</code>
+        <span>${escapeHtml(item.note)}</span>
+      </button>
+    `).join("");
+  } catch (error) {
+    console.error("formulaLibraryGroups failed", error);
+    formulaLibraryHeaders = `<div class="muted">Formelbibliothek konnte nicht geladen werden.</div>`;
+    formulaLibraryItems = "";
+  }
+
+  let customLibraryCards = "";
+  try {
+    customLibraryCards = (state.model.customLibrary || []).map((item) => `
+      <article class="custom-formula-card">
+        <div>
+          <strong>${escapeHtml(item.name)}</strong>
+          <span>${escapeHtml(item.outputLabel || "Ergebnis")}</span>
+        </div>
+        <code>${escapeHtml(item.formula)}</code>
+        <small>${escapeHtml(item.description || "")}</small>
+        <div class="row-actions">
+          <button class="icon-btn" data-action="load-custom-formula" data-custom-formula-id="${escapeAttr(item.id)}">Laden</button>
+          <button class="icon-btn" data-action="delete-custom-formula" data-custom-formula-id="${escapeAttr(item.id)}">Löschen</button>
+        </div>
+      </article>
+    `).join("");
+  } catch (error) {
+    console.error("customLibraryCards failed", error);
+    customLibraryCards = `<div class="muted">Eigene Formeln konnten nicht geladen werden.</div>`;
+  }
   elements.modelForm.innerHTML = `
     <div class="model-hero">
       <div>
@@ -544,7 +685,7 @@ function renderModelSection() {
           <select id="model-template" data-model-template>
             ${MODEL_TEMPLATES.map((template) => `<option value="${template.id}" ${template.id === model.templateId ? "selected" : ""}>${escapeHtml(template.name)}</option>`).join("")}
           </select>
-          <div class="field-help">Vorlagen geben fachlich geprüfte Standardlogiken vor. Die Formel lässt sich innerhalb der verfügbaren Platzhalter anpassen.</div>
+          <div class="field-help">Vorlagen geben fachlich geprüfte Standardlogiken vor. Aktive Eingangsparameter und Risiken erscheinen automatisch als Platzhalter.</div>
         </div>
 
         <div class="model-summary">
@@ -556,14 +697,7 @@ function renderModelSection() {
         </div>
 
         <div class="form-grid">
-          ${field("Basiswert", "model.baseValue", model.baseValue, "number", "Z. B. Bodenwert, Kaufpreis oder Basisbudget")}
-          ${field("Jahresertrag", "model.annualIncome", model.annualIncome, "number", "Für Ertragswert oder DCF")}
-          ${field("Jahreskosten", "model.annualCost", model.annualCost, "number", "Laufende Kosten oder Bewirtschaftung")}
-          ${field("Jahres-Cashflow", "model.annualCashflow", model.annualCashflow, "number", "Für DCF-Berechnungen")}
-          ${field("Kapitalisierungszins", "model.capRate", model.capRate, "number", "z. B. 0,05")}
-          ${field("Restwert", "model.residualValue", model.residualValue, "number", "Verkaufserlös oder Exit-Wert")}
-          ${field("Diskontierungszins", "model.discountRate", model.discountRate, "number", "z. B. 0,05")}
-          ${field("Haltedauer", "model.holdingPeriod", model.holdingPeriod, "number", "Jahre")}
+          ${templateFieldCards}
         </div>
       </div>
 
@@ -575,13 +709,27 @@ function renderModelSection() {
         </div>
 
         <div class="formula-toolbar card-soft">
+          <div class="toolbar-label">Aktive Eingangsparameter</div>
+          <div class="token-grid token-grid-compact">${activeParameterButtons || `<span class="muted token-empty">Keine aktiven Eingangsparameter vorhanden.</span>`}</div>
+        </div>
+
+        <div class="formula-toolbar card-soft">
+          <div class="toolbar-label">Aktive Risiken</div>
+          <div class="token-grid token-grid-compact">${activeRiskButtons || `<span class="muted token-empty">Keine aktiven Risiken vorhanden.</span>`}</div>
+        </div>
+
+        <div class="formula-toolbar card-soft">
           <div class="toolbar-label">Verfügbare Platzhalter / Formelbausteine</div>
-          <div class="token-grid">${tokenButtons}</div>
+          <div class="token-grid token-grid-compact">${staticTokenButtons}</div>
         </div>
 
         <div class="formula-preview ${validation.ok ? "status-green" : "status-red"}">
           <strong>${validation.ok ? "Formel valide" : "Formel prüfen"}</strong>
           <span>${validation.ok ? "Die Formel kann in der Simulation verwendet werden." : escapeHtml(validation.error)}</span>
+        </div>
+
+        <div class="action-row">
+          <button type="button" class="btn btn-secondary" data-action="sync-model-parameters">Modellwerte in Eingangsparameter übernehmen</button>
         </div>
 
         <div class="field">
@@ -596,6 +744,8 @@ function renderModelSection() {
       <div class="toolbar-label">Fachliche Formelbibliothek</div>
       <div class="toolbar-label">Bewertungsmodelle</div>
       <div class="model-library-grid">${modelLibraryCards}</div>
+      <div class="formula-library-categories">${formulaLibraryHeaders}</div>
+      <div class="formula-library-grid formula-library-grid-full">${formulaLibraryItems}</div>
       <div class="custom-formula-section">
         <div class="toolbar-label">Eigene Formelbibliothek</div>
         <div class="custom-formula-form">
@@ -621,17 +771,23 @@ function renderModelSection() {
 function renderParameterTable() {
   const summary = parameterRegisterSummary();
   const query = String(state.ui.parameterSearch || "").trim().toLowerCase();
-  const rows = state.parameters.filter((parameter) => matchesParameterSearch(parameter, query)).map((parameter) => {
+  const visibleParameters = state.parameters.filter((parameter) => matchesParameterSearch(parameter, query));
+  const rows = visibleParameters.map((parameter) => {
     const validation = validateParameter(parameter);
     return `
       <tr class="${validation.valid ? "" : "invalid"}">
-        <td><input data-collection="parameters" data-id="${parameter.id}" data-field="id" value="${escapeAttr(parameter.id)}" readonly /></td>
-        <td><input data-collection="parameters" data-id="${parameter.id}" data-field="label" value="${escapeAttr(parameter.label)}" placeholder="Bezeichnung" /></td>
-        <td><input data-collection="parameters" data-id="${parameter.id}" data-field="category" value="${escapeAttr(parameter.category)}" placeholder="Kategorie" /></td>
-        <td><textarea data-collection="parameters" data-id="${parameter.id}" data-field="description" placeholder="Beschreibung">${escapeHtml(parameter.description)}</textarea></td>
-        <td><input type="number" step="any" data-collection="parameters" data-id="${parameter.id}" data-field="min" value="${escapeAttr(parameter.min)}" /></td>
-        <td><input type="number" step="any" data-collection="parameters" data-id="${parameter.id}" data-field="mode" value="${escapeAttr(parameter.mode)}" /></td>
-        <td><input type="number" step="any" data-collection="parameters" data-id="${parameter.id}" data-field="max" value="${escapeAttr(parameter.max)}" /></td>
+        <td>
+          <input data-collection="parameters" data-id="${parameter.id}" data-field="label" value="${escapeAttr(parameter.label)}" placeholder="Bezeichnung" />
+        </td>
+        <td>
+          <input class="money-input" type="text" inputmode="decimal" data-collection="parameters" data-id="${parameter.id}" data-field="min" value="${escapeAttr(formatMoneyInput(parameter.min))}" />
+        </td>
+        <td>
+          <input class="money-input" type="text" inputmode="decimal" data-collection="parameters" data-id="${parameter.id}" data-field="mode" value="${escapeAttr(formatMoneyInput(parameter.mode))}" />
+        </td>
+        <td>
+          <input class="money-input" type="text" inputmode="decimal" data-collection="parameters" data-id="${parameter.id}" data-field="max" value="${escapeAttr(formatMoneyInput(parameter.max))}" />
+        </td>
         <td>
           <select data-collection="parameters" data-id="${parameter.id}" data-field="distribution">
             ${selectOption("triangle", "Dreieck", parameter.distribution)}
@@ -640,12 +796,9 @@ function renderParameterTable() {
             ${selectOption("beta-pert", "Beta-PERT", parameter.distribution)}
           </select>
         </td>
-        <td><input data-collection="parameters" data-id="${parameter.id}" data-field="unit" value="${escapeAttr(parameter.unit)}" placeholder="EUR, Tage, m²" /></td>
         <td><input type="checkbox" data-collection="parameters" data-id="${parameter.id}" data-field="active" ${parameter.active !== false ? "checked" : ""} /></td>
-        <td><input data-collection="parameters" data-id="${parameter.id}" data-field="comment" value="${escapeAttr(parameter.comment)}" placeholder="Kommentar" /></td>
         <td>
           <div class="row-actions">
-            <button class="icon-btn" data-action="duplicate-parameter" data-id="${parameter.id}">Duplizieren</button>
             <button class="icon-btn" data-action="delete-parameter" data-id="${parameter.id}">Löschen</button>
           </div>
           ${validation.valid ? "" : `<div class="error-text">${validation.message}</div>`}
@@ -653,6 +806,30 @@ function renderParameterTable() {
       </tr>
     `;
   }).join("");
+  const sharedCategory = sharedValue(visibleParameters, "category");
+  const sharedDescription = sharedValue(visibleParameters, "description");
+  const sharedUnit = sharedValue(visibleParameters, "unit");
+  const sharedComment = sharedValue(visibleParameters, "comment");
+  const distributionInfo = `
+    <div class="info-grid">
+      <article class="info-chip">
+        <strong>Dreieck</strong>
+        <span>Lineare Verteilung zwischen Minimum, Modus und Maximum.</span>
+      </article>
+      <article class="info-chip">
+        <strong>Gleich</strong>
+        <span>Alle Werte zwischen Minimum und Maximum sind gleich wahrscheinlich.</span>
+      </article>
+      <article class="info-chip">
+        <strong>Normal</strong>
+        <span>Symmetrische Verteilung um den wahrscheinlichsten Wert mit Streuung.</span>
+      </article>
+      <article class="info-chip">
+        <strong>Beta-PERT</strong>
+        <span>Glättet die Dreiecksverteilung und gewichtet den wahrscheinlichsten Wert stärker.</span>
+      </article>
+    </div>
+  `;
   elements.parametersTable.innerHTML = `
     <div class="register-summary">
       <div class="field" style="grid-column: 1 / -1;">
@@ -663,13 +840,39 @@ function renderParameterTable() {
       <div class="register-stat"><strong>${summary.invalid}</strong><span>Ungültig</span></div>
       <div class="register-stat"><strong>${summary.inactive}</strong><span>Inaktiv</span></div>
     </div>
+    <div class="register-meta card-soft">
+      <div class="toolbar-label">Gemeinsame Stammdaten</div>
+      <div class="register-meta-grid">
+        <div class="register-meta-item">
+          <strong>Kategorie</strong>
+          <span>${escapeHtml(sharedCategory || "Mehrere Kategorien in den sichtbaren Zeilen")}</span>
+        </div>
+        <div class="register-meta-item">
+          <strong>Beschreibung</strong>
+          <span>${escapeHtml(sharedDescription || "Mehrere Beschreibungen in den sichtbaren Zeilen")}</span>
+        </div>
+        <div class="register-meta-item">
+          <strong>Einheit</strong>
+          <span>${escapeHtml(sharedUnit || "Mehrere Einheiten in den sichtbaren Zeilen")}</span>
+        </div>
+        <div class="register-meta-item">
+          <strong>Kommentar</strong>
+          <span>${escapeHtml(sharedComment || "Mehrere Kommentare in den sichtbaren Zeilen")}</span>
+        </div>
+      </div>
+      <div class="field-help">ID ist eine interne technische Kennung und wird in der Tabelle nicht angezeigt. Kategorie, Beschreibung, Einheit und Kommentar werden hier gebündelt, wenn sie in den sichtbaren Zeilen gleich sind.</div>
+    </div>
+    <div class="register-meta card-soft">
+      <div class="toolbar-label">Verteilungs-Hinweis</div>
+      ${distributionInfo}
+    </div>
     <table>
       <thead>
         <tr>
-          <th>ID</th><th>Bezeichnung</th><th>Kategorie</th><th>Beschreibung</th><th>Min</th><th>Modus</th><th>Max</th><th>Verteilung</th><th>Einheit</th><th>Aktiv</th><th>Kommentar</th><th>Aktionen</th>
+          <th>Bezeichnung</th><th>Min</th><th>Wahrsch. Wert</th><th>Max</th><th>Verteilung</th><th>Aktiv</th><th>Aktionen</th>
         </tr>
       </thead>
-      <tbody>${rows || `<tr><td colspan="12" class="muted">Noch keine Parameter vorhanden.</td></tr>`}</tbody>
+      <tbody>${rows || `<tr><td colspan="7" class="muted">Noch keine Parameter vorhanden.</td></tr>`}</tbody>
     </table>
   `;
 }
@@ -682,13 +885,17 @@ function renderRiskTable() {
     return `
       <tr class="${validation.valid ? "" : "invalid"}">
         <td><input data-collection="risks" data-id="${risk.id}" data-field="riskId" value="${escapeAttr(risk.riskId)}" /></td>
-        <td><input data-collection="risks" data-id="${risk.id}" data-field="label" value="${escapeAttr(risk.label)}" placeholder="Bezeichnung" /></td>
-        <td><input data-collection="risks" data-id="${risk.id}" data-field="category" value="${escapeAttr(risk.category)}" placeholder="Kategorie" /></td>
-        <td><textarea data-collection="risks" data-id="${risk.id}" data-field="description" placeholder="Beschreibung">${escapeHtml(risk.description)}</textarea></td>
+        <td>
+          <input data-collection="risks" data-id="${risk.id}" data-field="label" value="${escapeAttr(risk.label)}" placeholder="Bezeichnung" />
+          <div class="register-cell-meta">
+            <div><strong>Kategorie:</strong> <input data-collection="risks" data-id="${risk.id}" data-field="category" value="${escapeAttr(risk.category)}" placeholder="Kategorie" /></div>
+            <div><strong>Beschreibung:</strong> <textarea data-collection="risks" data-id="${risk.id}" data-field="description" placeholder="Beschreibung">${escapeHtml(risk.description)}</textarea></div>
+          </div>
+        </td>
         <td><input type="number" step="any" data-collection="risks" data-id="${risk.id}" data-field="probability" value="${escapeAttr(risk.probability)}" /></td>
-        <td><input type="number" step="any" data-collection="risks" data-id="${risk.id}" data-field="minImpact" value="${escapeAttr(risk.minImpact)}" /></td>
-        <td><input type="number" step="any" data-collection="risks" data-id="${risk.id}" data-field="modeImpact" value="${escapeAttr(risk.modeImpact)}" /></td>
-        <td><input type="number" step="any" data-collection="risks" data-id="${risk.id}" data-field="maxImpact" value="${escapeAttr(risk.maxImpact)}" /></td>
+        <td><input class="money-input" type="text" inputmode="decimal" data-collection="risks" data-id="${risk.id}" data-field="minImpact" value="${escapeAttr(formatMoneyInput(risk.minImpact))}" /></td>
+        <td><input class="money-input" type="text" inputmode="decimal" data-collection="risks" data-id="${risk.id}" data-field="modeImpact" value="${escapeAttr(formatMoneyInput(risk.modeImpact))}" /></td>
+        <td><input class="money-input" type="text" inputmode="decimal" data-collection="risks" data-id="${risk.id}" data-field="maxImpact" value="${escapeAttr(formatMoneyInput(risk.maxImpact))}" /></td>
         <td><input type="number" step="any" data-collection="risks" data-id="${risk.id}" data-field="timeImpact" value="${escapeAttr(risk.timeImpact)}" /></td>
         <td><input data-collection="risks" data-id="${risk.id}" data-field="responsible" value="${escapeAttr(risk.responsible)}" /></td>
         <td><input data-collection="risks" data-id="${risk.id}" data-field="measure" value="${escapeAttr(risk.measure)}" /></td>
@@ -718,10 +925,10 @@ function renderRiskTable() {
     <table>
       <thead>
         <tr>
-          <th>ID</th><th>Bezeichnung</th><th>Kategorie</th><th>Beschreibung</th><th>Wahrsch.</th><th>Min</th><th>Modus</th><th>Max</th><th>Termin</th><th>Verantwortlicher</th><th>Maßnahme</th><th>Status</th><th>Restgef.</th><th>Aktiv</th><th>Aktionen</th>
+          <th>ID</th><th>Bezeichnung / Stammdaten</th><th>Wahrsch.</th><th>Min</th><th>Modus</th><th>Max</th><th>Termin</th><th>Verantwortlicher</th><th>Maßnahme</th><th>Status</th><th>Restgef.</th><th>Aktiv</th><th>Aktionen</th>
         </tr>
       </thead>
-      <tbody>${rows || `<tr><td colspan="15" class="muted">Noch keine Risiken vorhanden.</td></tr>`}</tbody>
+      <tbody>${rows || `<tr><td colspan="13" class="muted">Noch keine Risiken vorhanden.</td></tr>`}</tbody>
     </table>
   `;
 }
@@ -730,7 +937,7 @@ function renderSimulationForm() {
   elements.simulationForm.innerHTML = `
     <div class="form-grid">
       ${selectField("Anzahl Simulationen", "settings.iterations", String(state.settings.iterations), ["1000", "5000", "10000", "25000", "50000"], "Wählbare Laufzahl für die Monte-Carlo-Simulation")}
-      ${field("Zielbudget", "settings.budget", state.settings.budget, "number", `Budget in ${state.project.currency || "EUR"}`)}
+      ${field("Zielbudget", "settings.budget", formatMoney(state.settings.budget), "text", "Budget in €")}
       ${field("Aktives Szenario", "settings.activeScenarioId", state.settings.activeScenarioId, "select", "", renderScenarioSelectOptions())}
       ${field("Projektwährung", "project.currency", state.project.currency, "text", "Wird im Ergebnis verwendet")}
       ${field("Einheit", "project.unit", state.project.unit, "text", "z. B. EUR")}
@@ -1138,6 +1345,19 @@ function riskRegisterSummary() {
   };
 }
 
+function sharedValue(items, field) {
+  const values = (items || [])
+    .map((item) => String(item?.[field] ?? "").trim())
+    .filter((value) => value.length > 0);
+  if (!values.length) return "";
+  const first = values[0];
+  return values.every((value) => value === first) ? first : "";
+}
+
+function isActiveItem(item) {
+  return item?.active !== false;
+}
+
 function validateAll() {
   const parameterValid = state.parameters.every((parameter) => validateParameter(parameter).valid);
   const riskValid = state.risks.every((risk) => validateRisk(risk).valid);
@@ -1171,7 +1391,31 @@ function validateRisk(risk) {
 
 function toNumeric(value) {
   if (value === "" || value === null || value === undefined) return NaN;
-  return Number(String(value).replace(",", "."));
+  const normalized = String(value)
+    .trim()
+    .replace(/\u00a0/g, " ")
+    .replace(/€/g, "")
+    .replace(/\s+/g, "")
+    .replace(/[^\d,.\-]/g, "");
+  if (!normalized) return NaN;
+  const hasComma = normalized.includes(",");
+  const hasDot = normalized.includes(".");
+  if (hasComma && hasDot) {
+    return Number(normalized.replace(/\./g, "").replace(",", "."));
+  }
+  if (hasComma) {
+    return Number(normalized.replace(",", "."));
+  }
+  if (hasDot) {
+    const parts = normalized.split(".");
+    if (parts.length > 2) {
+      return Number(parts.join(""));
+    }
+    if (parts[1] && parts[1].length === 3 && parts[0].length >= 1) {
+      return Number(parts.join(""));
+    }
+  }
+  return Number(normalized);
 }
 
 function field(label, stateField, value, type, help = "", options = "", scenarioId = "") {
@@ -1263,8 +1507,54 @@ function applyModelTemplate(templateId) {
     description: template.id === "custom" ? currentDescription || template.description : template.description,
     formula: template.id === "custom" ? currentFormula : template.formula
   };
+  if (template.id !== "custom") {
+    syncModelFieldsToParameters(template.id);
+  }
   scheduleRender();
   scheduleSave();
+}
+
+function syncModelFieldsToParameters(templateId = state.model?.templateId || "custom") {
+  const template = getModelTemplate(templateId);
+  const fields = Array.isArray(template.fields) ? template.fields : [];
+  if (!fields.length) {
+    flash("Dieses Bewertungsmodell hat keine separaten Modellwerte zum Übernehmen", true);
+    return;
+  }
+  const existing = Array.isArray(state.parameters) ? [...state.parameters] : [];
+  const labels = new Set(existing.map((item) => `${item.category || ""}|${item.label || ""}`.toLowerCase()));
+  for (const spec of fields) {
+    const token = spec.token || spec.label || spec.key;
+    const numericValue = Number(state.model?.[spec.key]);
+    const value = Number.isFinite(numericValue) ? numericValue : Number(spec.defaultValue ?? 0);
+    const parameterId = `MODEL_${template.id}_${spec.key}`;
+    const label = spec.label || token;
+    const category = `Bewertungsmodell`;
+    const existingItem = existing.find((item) => item.id === parameterId);
+    const nextItem = {
+      id: parameterId,
+      label,
+      category,
+      description: `${template.name}: ${label} als Modellwert übernommen`,
+      min: value,
+      mode: value,
+      max: value,
+      distribution: "uniform",
+      unit: state.project.unit || state.project.currency || "EUR",
+      active: true,
+      comment: "Aus Bewertungsmodell übernommen"
+    };
+    if (existingItem) {
+      Object.assign(existingItem, nextItem);
+    } else if (!labels.has(`${category}|${label}`.toLowerCase())) {
+      existing.unshift(nextItem);
+      labels.add(`${category}|${label}`.toLowerCase());
+    }
+  }
+  state.parameters = existing;
+  scheduleRender();
+  scheduleSave(true);
+  flash("Modellwerte in Eingangsparameter übernommen");
 }
 
 function saveCustomFormula() {
@@ -1376,8 +1666,33 @@ function isTokenActiveInExpression(expression, token) {
   return pattern.test(String(expression));
 }
 
-function validateCurrentFormula(model) {
-  const sampleContext = {
+function buildModelTokenGroups(formula) {
+  const usedTokens = new Set(FORMULA_TOKENS.map((item) => item.token));
+  const activeParameters = (state.parameters || []).filter(isActiveItem);
+  const activeRisks = (state.risks || []).filter(isActiveItem);
+  const parameters = activeParameters.map((parameter, index) => {
+    const token = createFormulaPlaceholderKey(parameter.id || parameter.label || `PAR_${index + 1}`, "PAR", usedTokens);
+    return {
+      token,
+      label: parameter.label || parameter.id || token
+    };
+  });
+  const risks = activeRisks.map((risk, index) => {
+    const token = createFormulaPlaceholderKey(risk.riskId || risk.id || risk.label || `RISK_${index + 1}`, "RISK", usedTokens);
+    return {
+      token,
+      label: risk.label || risk.riskId || risk.id || token
+    };
+  });
+  return {
+    staticTokens: FORMULA_TOKENS,
+    parameters,
+    risks
+  };
+}
+
+function buildModelValidationContext(model) {
+  const context = {
     BASE_VALUE: model.baseValue,
     PARAM_SUM: 1000,
     RISK_COST: 100,
@@ -1390,8 +1705,30 @@ function validateCurrentFormula(model) {
     DISCOUNT_RATE: model.discountRate || 0.05,
     HOLDING_PERIOD: model.holdingPeriod || 10
   };
-  const validation = validateFormulaExpression(model.formula, sampleContext);
-  return validation;
+  const templateDefinition = getModelTemplate(model.templateId || "custom");
+  for (const fieldDef of templateDefinition.fields || []) {
+    const token = fieldDef.token || fieldDef.label || fieldDef.key;
+    const numeric = toNumeric(model?.[fieldDef.key]);
+    context[token] = Number.isFinite(numeric) ? numeric : (fieldDef.defaultValue ?? 0);
+  }
+  const tokenGroups = buildModelTokenGroups(model.formula);
+  const activeParameters = (state.parameters || []).filter(isActiveItem);
+  const activeRisks = (state.risks || []).filter(isActiveItem);
+  tokenGroups.parameters.forEach((item, index) => {
+    const parameter = activeParameters[index];
+    context[item.token] = toNumeric(parameter?.mode ?? parameter?.min ?? parameter?.max ?? 1) || 1;
+  });
+  tokenGroups.risks.forEach((item, index) => {
+    const risk = activeRisks[index];
+    const probability = toNumeric(risk?.probability ?? 0) || 0;
+    const impact = toNumeric(risk?.modeImpact ?? risk?.minImpact ?? risk?.maxImpact ?? 1) || 1;
+    context[item.token] = ((probability / 100) * impact) || 1;
+  });
+  return context;
+}
+
+function validateCurrentFormula(model) {
+  return validateFormulaExpression(model.formula, buildModelValidationContext(model));
 }
 
 function validateFormulaExpression(expression, context) {
@@ -1720,7 +2057,12 @@ function resizeCanvas(canvas) {
 }
 
 function formatMoney(value) {
-  return `${formatNumber(value)} ${state.project.currency || "EUR"}`;
+  return `${formatNumber(value)} €`;
+}
+
+function formatMoneyInput(value) {
+  if (value === "" || value === null || value === undefined) return "";
+  return formatMoney(value);
 }
 
 function formatPercent(value) {
