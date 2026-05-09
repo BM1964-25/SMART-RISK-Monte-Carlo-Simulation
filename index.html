@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SMART RISK Monte-Carlo-Simulation</title>
+  <script>
+    if (location.protocol === "file:" && location.hostname !== "127.0.0.1" && location.hostname !== "localhost") {
+      location.replace("http://127.0.0.1:8000/index.html");
+    }
+  </script>
+  <link rel="stylesheet" href="styles.css?v=20260509-12" />
+  <script type="module" src="app.js?v=20260509-25"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand-block">
+        <div class="brand-mark" aria-hidden="true">
+          <img src="assets/smart-risk-icon.jpeg" alt="" />
+        </div>
+        <div>
+          <h1>SMART RISK</h1>
+          <p>Monte-Carlo-Simulation</p>
+        </div>
+      </div>
+      <button type="button" class="sidebar-toggle" data-action="toggle-sidebar" aria-label="Menü einklappen">
+        <span aria-hidden="true">☰</span>
+      </button>
+      <nav class="nav" id="nav">
+        <button type="button" class="nav-item active" data-view="dashboard"><span class="nav-icon" aria-hidden="true">⌂</span><span class="nav-label">Dashboard</span></button>
+        <button type="button" class="nav-item" data-view="project"><span class="nav-icon" aria-hidden="true">▣</span><span class="nav-label">Projektstammdaten</span></button>
+        <button type="button" class="nav-item" data-view="model"><span class="nav-icon" aria-hidden="true">ƒ</span><span class="nav-label">Bewertungsmodell</span></button>
+        <button type="button" class="nav-item" data-view="uncertainties"><span class="nav-icon" aria-hidden="true">◫</span><span class="nav-label">Unsicherheiten</span></button>
+        <button type="button" class="nav-item" data-view="simulation"><span class="nav-icon" aria-hidden="true">▶</span><span class="nav-label">Simulation</span></button>
+        <button type="button" class="nav-item" data-view="analysis"><span class="nav-icon" aria-hidden="true">▤</span><span class="nav-label">Ergebnisanalyse</span></button>
+        <button type="button" class="nav-item" data-view="sensitivity"><span class="nav-icon" aria-hidden="true">◎</span><span class="nav-label">Sensitivität</span></button>
+        <button type="button" class="nav-item" data-view="scenarios"><span class="nav-icon" aria-hidden="true">◌</span><span class="nav-label">Szenarien</span></button>
+        <button type="button" class="nav-item" data-view="report"><span class="nav-icon" aria-hidden="true">≣</span><span class="nav-label">Bericht</span></button>
+        <button type="button" class="nav-item" data-view="data"><span class="nav-icon" aria-hidden="true">⎘</span><span class="nav-label">Datenmanagement</span></button>
+      </nav>
+      <div class="sidebar-footnote">
+        <span class="badge badge-soft">Lokal lauffähig</span>
+        <span class="badge badge-soft">Autosave aktiv</span>
+      </div>
+    </aside>
+
+    <div class="content">
+      <header class="topbar card">
+        <div>
+          <div class="eyebrow">Decision Support Tool</div>
+          <h2 id="project-title">SMART RISK Monte-Carlo-Simulation</h2>
+          <p id="project-subtitle" class="topbar-subtitle">
+            Probabilistische Risiko- und Szenarioanalyse<br />
+            für Bau, Immobilien und Projektsteuerung.
+          </p>
+        </div>
+        <div class="topbar-actions">
+          <button class="btn btn-secondary" data-action="new-project">Neues Projekt</button>
+          <button class="btn btn-primary" data-action="save-project">Projekt speichern</button>
+          <button class="btn btn-secondary" data-action="load-demo">Demo-Daten laden</button>
+        </div>
+      </header>
+
+      <section class="status-strip card">
+        <span id="save-status" class="badge badge-neutral">Nicht gespeichert</span>
+        <span id="run-status" class="badge badge-neutral">Keine Simulation gestartet</span>
+      </section>
+
+      <section class="workflow-rail card">
+        <div id="workflow-steps" class="workflow-stepper"></div>
+      </section>
+
+      <main class="main-grid">
+        <section class="view-section active" data-section="dashboard">
+          <div class="section-header">
+            <div>
+              <h3>Dashboard</h3>
+              <p>Startübersicht mit den zentralen Kennzahlen des aktuellen Projekts.</p>
+            </div>
+          </div>
+          <article class="card launcher-card" id="launcher-card"></article>
+          <div class="metric-grid" id="dashboard-metrics"></div>
+          <div class="dashboard-stack">
+            <article class="card dashboard-distribution">
+              <div class="card-head">
+                <h4>Verteilung der Simulationsergebnisse</h4>
+                <span class="badge badge-soft">Histogramm + kumulative Verteilung</span>
+              </div>
+              <div class="chart-grid">
+                <article class="chart-panel">
+                  <div class="chart-panel-head">
+                    <strong>Histogramm</strong>
+                    <span>Häufigkeitsverteilung</span>
+                  </div>
+                  <canvas id="histogram-canvas" width="760" height="320"></canvas>
+                </article>
+                <article class="chart-panel">
+                  <div class="chart-panel-head">
+                    <strong>Kumulative Verteilung</strong>
+                    <span>Wahrscheinlichkeitskurve</span>
+                  </div>
+                  <canvas id="cdf-canvas" width="760" height="320"></canvas>
+                </article>
+              </div>
+            </article>
+            <article class="card callout" id="decision-callout"></article>
+          </div>
+        </section>
+
+        <section class="view-section" data-section="project">
+          <div class="section-header">
+            <div>
+              <h3>Projektstammdaten</h3>
+              <p>Diese Angaben bilden den Rahmen der Analyse und werden im Bericht verwendet.</p>
+            </div>
+          </div>
+          <div class="card form-card" id="project-form"></div>
+        </section>
+
+        <section class="view-section" data-section="model">
+          <div class="section-header">
+            <div>
+              <h3>Bewertungsmodell</h3>
+              <p>Wähle ein fachliches Modul und passe die Formel innerhalb sicherer Grenzen an.</p>
+            </div>
+          </div>
+          <div class="card form-card" id="model-form"></div>
+        </section>
+
+        <section class="view-section" data-section="uncertainties">
+          <div class="section-header">
+            <div>
+              <h3>Unsicherheiten</h3>
+              <p>Bandbreitenparameter für die Monte-Carlo-Simulation.</p>
+            </div>
+            <div class="action-row">
+              <button class="btn btn-secondary" data-action="add-parameter-template">Beispielparameter hinzufügen</button>
+              <button class="btn btn-primary" data-action="add-parameter">Leeren Parameter hinzufügen</button>
+            </div>
+          </div>
+          <div class="uncertainty-stack">
+            <article class="card table-card">
+              <div class="card-head">
+                <h4>Bandbreitenparameter</h4>
+                <span class="badge badge-soft">Min / Wahrscheinlichster Wert / Max</span>
+              </div>
+              <div class="table-wrap" id="parameters-table"></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="view-section" data-section="simulation">
+          <div class="section-header">
+            <div>
+              <h3>Simulation</h3>
+              <p>Steuere die Anzahl der Läufe, Zielgröße und Entscheidungslogik. Das Ergebnis erscheint anschließend in der Ergebnisanalyse.</p>
+            </div>
+            <button class="btn btn-primary" data-action="run-simulation">Simulation starten</button>
+          </div>
+          <article class="card simulation-progress-card" id="simulation-progress-card">
+            <div class="card-head">
+              <h4>Fortschritt der Simulation</h4>
+              <span class="badge badge-soft" id="simulation-progress-label">Bereit</span>
+            </div>
+            <div class="progress-track" aria-hidden="true">
+              <div class="progress-fill" id="simulation-progress-fill" style="width:0%"></div>
+            </div>
+            <div class="progress-steps" id="simulation-progress-steps">
+              <div class="progress-step is-active" data-stage="validate"><span>1</span><strong>Validierung</strong></div>
+              <div class="progress-step" data-stage="sample"><span>2</span><strong>Stichprobe</strong></div>
+              <div class="progress-step" data-stage="compute"><span>3</span><strong>Berechnung</strong></div>
+              <div class="progress-step" data-stage="finalize"><span>4</span><strong>Auswertung</strong></div>
+            </div>
+            <div class="field-help">Die Simulation läuft sichtbar in vier Schritten. „Stichprobe“ bedeutet, dass pro Lauf Zufallswerte aus den aktiven Unsicherheiten gezogen werden. Nach Abschluss werden die Kennzahlen in der Ergebnisanalyse aktualisiert.</div>
+          </article>
+          <div class="card form-card" id="simulation-form"></div>
+        </section>
+
+        <section class="view-section" data-section="analysis">
+          <div class="section-header">
+            <div>
+              <h3>Ergebnisanalyse</h3>
+              <p>Kennzahlen, Perzentile, Zielabweichung und Managementinterpretation.</p>
+            </div>
+          </div>
+          <div class="metric-grid" id="analysis-metrics"></div>
+          <div class="analysis-grid">
+            <article class="card">
+              <div class="card-head">
+                <h4>Perzentilübersicht</h4>
+                <span class="badge badge-soft">P10 / P50 / P80 / P90 / P95</span>
+              </div>
+              <div id="percentile-table"></div>
+            </article>
+            <article class="card">
+              <div class="card-head">
+                <h4>Zielbewertung</h4>
+                <span id="traffic-light" class="status-pill">-</span>
+              </div>
+              <div id="budget-analysis"></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="view-section" data-section="sensitivity">
+          <div class="section-header">
+            <div>
+              <h3>Sensitivitätsanalyse</h3>
+              <p>Welche Eingangsgrößen treiben das Ergebnis am stärksten?</p>
+            </div>
+          </div>
+          <div class="analysis-grid">
+            <article class="card">
+              <div class="card-head">
+                <h4>Tornado-Diagramm</h4>
+                <span class="badge badge-soft">Canvas</span>
+              </div>
+              <canvas id="tornado-canvas" width="760" height="420"></canvas>
+            </article>
+            <article class="card">
+              <div class="card-head">
+                <h4>Treiber-Rangliste</h4>
+                <span class="badge badge-soft">absteigend</span>
+              </div>
+              <div id="sensitivity-ranking"></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="view-section" data-section="scenarios">
+          <div class="section-header">
+            <div>
+              <h3>Szenarien</h3>
+              <p>Basisszenario, optimistisches Szenario und kritisches Szenario sowie eigene Varianten.</p>
+            </div>
+            <div class="action-row">
+              <button class="btn btn-secondary" data-action="add-scenario">Szenario hinzufügen</button>
+              <button class="btn btn-primary" data-action="compare-scenarios">Vergleich berechnen</button>
+            </div>
+          </div>
+          <article class="card scenario-explainer">
+            <div class="card-head">
+              <h4>Was Szenarien darstellen</h4>
+              <span class="badge badge-soft">Basis / Optimistisch / Kritisch</span>
+            </div>
+            <div class="scenario-explainer-grid">
+              <div>
+                <strong>Basisszenario</strong>
+                <span>Realistische Mitte der Annahmen. Dient als Ausgangspunkt für die Standardbewertung.</span>
+              </div>
+              <div>
+                <strong>Optimistisches Szenario</strong>
+                <span>Bessere Rahmenbedingungen, geringere Risiken oder günstigere Werte. Zeigt die mögliche Oberseite.</span>
+              </div>
+              <div>
+                <strong>Kritisches Szenario</strong>
+                <span>Ungünstigere Annahmen und höhere Risiken. Zeigt, wie robust das Projekt im Stressfall bleibt.</span>
+              </div>
+            </div>
+          </article>
+          <div id="scenario-cards" class="scenario-grid"></div>
+          <div class="card table-card">
+            <div class="card-head">
+              <h4>Szenarienvergleich</h4>
+              <span class="badge badge-soft">P50 / P80 / P90</span>
+            </div>
+            <div id="scenario-compare"></div>
+          </div>
+        </section>
+
+        <section class="view-section" data-section="report">
+          <div class="section-header">
+            <div>
+              <h3>Bericht</h3>
+              <p>Automatisch generierte Management-Zusammenfassung mit Copy-Funktion.</p>
+            </div>
+            <button class="btn btn-secondary" data-action="copy-report">Bericht kopieren</button>
+          </div>
+          <div class="card">
+            <pre id="report-output" class="report-output"></pre>
+          </div>
+        </section>
+
+        <section class="view-section" data-section="data">
+          <div class="section-header">
+            <div>
+              <h3>Datenmanagement</h3>
+              <p>Import, Export, Demo-Daten und vollständiges Zurücksetzen.</p>
+            </div>
+          </div>
+          <div class="card action-panel">
+            <div class="action-row">
+              <button class="btn btn-secondary" data-action="export-json">JSON exportieren</button>
+              <button class="btn btn-secondary" data-action="import-json">JSON importieren</button>
+              <button class="btn btn-secondary" data-action="import-parameter-csv">Parameter CSV importieren</button>
+              <button class="btn btn-secondary" data-action="import-risk-csv">Risiko CSV importieren</button>
+              <button class="btn btn-secondary" data-action="export-csv">CSV exportieren</button>
+            </div>
+            <div class="action-row">
+              <button class="btn btn-secondary" data-action="download-template">Datenvorlage</button>
+              <button class="btn btn-danger" data-action="reset-all">Alle Daten zurücksetzen</button>
+            </div>
+            <input id="import-file" type="file" accept="application/json,.json,text/csv,.csv" hidden />
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+</body>
+</html>
