@@ -735,8 +735,8 @@ function dashboardMetrics() {
       ["Erwartungswert", "–", "Noch keine Simulation gestartet"],
       ["Median", "–", "Noch keine Simulation gestartet"],
       ["P50 / P80 / P90", "–", "Noch keine Simulation gestartet"],
-      ["Spanne (Δ)", "–", "Noch keine Simulation gestartet"],
-      ["Δ Zielwert (P80)", "–", "Noch keine Simulation gestartet"]
+      ["Verteilungsspanne (Δ)", "–", "Noch keine Simulation gestartet"],
+      ["Abweichung zum Zielwert (P80)", "–", "Noch keine Simulation gestartet"]
     ];
   }
   const summary = latestRun.summary;
@@ -750,8 +750,18 @@ function dashboardMetrics() {
     ["Erwartungswert", formatModelResult(model, summary.mean), "Mittelwert der Verteilung"],
     ["Median", formatModelResult(model, summary.median), "50%-Quantil"],
     ["P50 / P80 / P90", `${formatModelResult(model, summary.p50)} / ${formatModelResult(model, summary.p80)} / ${formatModelResult(model, summary.p90)}`, "Management-Perzentile"],
-    { label: "Spanne (Δ)", value: renderDeltaSummary(summary.max, summary.min, summary.max - summary.min, model), sub: "Maximum minus Minimum", html: true },
-    { label: "Δ Zielwert (P80)", value: renderDeltaSummary(targetValue, summary.p80, getTargetDelta(summary, targetValue, meta), model), sub: "Zielwert minus P80", html: true }
+    { label: "Verteilungsspanne (Δ)", value: renderDeltaSummary(summary.max, summary.min, summary.max - summary.min, model), sub: "Maximum minus Minimum", html: true },
+    {
+      label: "Abweichung zum Zielwert (P80)",
+      value: renderDeltaSummary(
+        meta.higherIsBetter ? targetValue : summary.p80,
+        meta.higherIsBetter ? summary.p80 : targetValue,
+        getTargetDelta(summary, targetValue, meta),
+        model
+      ),
+      sub: meta.higherIsBetter ? "Zielwert minus P80" : "P80 minus Zielwert",
+      html: true
+    }
   ];
 }
 
@@ -2558,7 +2568,7 @@ function getOutcomeMeta(model = resolveCurrentModel()) {
 
 function getTargetDelta(summary, targetValue, meta = getOutcomeMeta()) {
   const p80 = Number(summary?.p80) || 0;
-  return meta.higherIsBetter ? (p80 - targetValue) : (targetValue - p80);
+  return meta.higherIsBetter ? (targetValue - p80) : (p80 - targetValue);
 }
 
 function formatOutcomeValue(model, value) {
