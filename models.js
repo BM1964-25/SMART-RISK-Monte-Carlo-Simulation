@@ -1,4 +1,4 @@
-export const FORMULA_TOKENS = [
+const FORMULA_TOKENS_RAW = [
   { token: "Basiswert", label: "Startwert des Modells" },
   { token: "SummeAktiverParameter", label: "Summe der aktiven Parameter" },
   { token: "Risikokosten", label: "Kostenwirkung der Risiken" },
@@ -15,27 +15,32 @@ export const FORMULA_TOKENS = [
   { token: "SonstigeWertbeeinflussendeUmstaende", label: "Sonstige wertbeeinflussende Umstände" },
   { token: "Diskontierungszins", label: "Diskontierungszins" },
   { token: "Haltedauer", label: "Haltedauer in Jahren" },
-  { token: "KG100", label: "DIN 276 - Kostengruppe 100" },
-  { token: "KG200", label: "DIN 276 - Kostengruppe 200" },
-  { token: "KG300", label: "DIN 276 - Kostengruppe 300" },
-  { token: "KG400", label: "DIN 276 - Kostengruppe 400" },
-  { token: "KG500", label: "DIN 276 - Kostengruppe 500" },
-  { token: "KG600", label: "DIN 276 - Kostengruppe 600" },
-  { token: "KG700", label: "DIN 276 - Kostengruppe 700" },
-  { token: "KG800", label: "DIN 276 - Kostengruppe 800" },
+  { token: "KG100", label: "KG 100" },
+  { token: "KG200", label: "KG 200" },
+  { token: "KG300", label: "KG 300" },
+  { token: "KG400", label: "KG 400" },
+  { token: "KG500", label: "KG 500" },
+  { token: "KG600", label: "KG 600" },
+  { token: "KG700", label: "KG 700" },
+  { token: "KG800", label: "KG 800" },
   { token: "Basiskosten", label: "Gesamtkosten nach DIN 276" },
   { token: "Gesamtrisiko", label: "Gesamtrisiko" },
   { token: "Projektbudget", label: "Gesamtbudget des Projekts" },
   { token: "Risikoaufschlag", label: "Risikoaufschlag" },
   { token: "Eintrittswahrscheinlichkeit", label: "Eintrittswahrscheinlichkeit" },
   { token: "Schadenshoehe", label: "Schadenshöhe" },
-  { token: "Risiko_i", label: "Einzelrisiko i" },
+  { token: "Risiko_1", label: "Risiko(1)" },
+  { token: "Risiko_2", label: "Risiko(2)" },
+  { token: "Risiko_3", label: "Risiko(3)" },
+  { token: "Risiko_4", label: "Risiko(4)" },
+  { token: "Risiko_5", label: "Risiko(5)" },
   { token: "Einnahmen", label: "Einnahmen" },
   { token: "Betriebskosten", label: "Betriebskosten" },
   { token: "Finanzierungskosten", label: "Finanzierungskosten" },
   { token: "Cashflow", label: "Cashflow" },
   { token: "Gewinn", label: "Gewinn" },
   { token: "Investition", label: "Investition" },
+  { token: "I_0", label: "Anfangsinvestition (I₀, €)" },
   { token: "Planung", label: "Planung" },
   { token: "Vergabe", label: "Vergabe" },
   { token: "Bau", label: "Bau" },
@@ -45,13 +50,21 @@ export const FORMULA_TOKENS = [
   { token: "Vermietungsquote", label: "Vermietungsquote" },
   { token: "Jahresnettomiete", label: "Jahresnettomiete" },
   { token: "Vervielfaeltiger", label: "Vervielfältiger" },
-  { token: "Kosten_0", label: "Ausgangskosten" },
-  { token: "i", label: "Inflationsrate" },
-  { token: "n", label: "Jahre / Laufzeit" },
+  { token: "Kosten_0", label: "Ausgangskosten (K0)" },
+  { token: "i", label: "Preissteigerungsrate (i, %)" },
+  { token: "n", label: "Laufzeit (n, Jahre)" },
   { token: "Kapital", label: "Kapital" },
   { token: "Zinssatz", label: "Zinssatz" },
   { token: "Laufzeit", label: "Laufzeit" }
 ];
+
+export const FORMULA_TOKENS = [...FORMULA_TOKENS_RAW].sort((a, b) => sortByVisibleLabel(a, b));
+
+function sortByVisibleLabel(a, b) {
+  const left = String(a?.label || a?.token || "");
+  const right = String(b?.label || b?.token || "");
+  return left.localeCompare(right, "de", { sensitivity: "base" });
+}
 
 export const MODEL_TEMPLATES = [
   {
@@ -132,9 +145,9 @@ export const MODEL_TEMPLATES = [
     formula: "Basiswert + (JahresCashflow * (1 - (1 + Diskontierungszins) ^ (-Haltedauer)) / Diskontierungszins) + Restwert - Risikokosten",
     fields: [
       { key: "baseValue", token: "Basiswert", label: "Basiswert", help: "Ausgangswert oder Anfangsinvestition", type: "number", format: "money", defaultValue: 0 },
-      { key: "annualCashflow", token: "JahresCashflow", label: "Jahres-Cashflow", help: "Jährlicher Netto-Cashflow", type: "number", format: "money", defaultValue: 0 },
-      { key: "discountRate", token: "Diskontierungszins", label: "Diskontierungszins", help: "z. B. 0,05", type: "number", defaultValue: 0.05 },
-      { key: "holdingPeriod", token: "Haltedauer", label: "Haltedauer", help: "Jahre", type: "number", defaultValue: 10 },
+      { key: "annualCashflow", token: "JahresCashflow", label: "Jahres-Cashflow", help: "Jährlicher Netto-Cashflow", type: "number", format: "money", defaultValue: 0, unit: "EUR" },
+      { key: "discountRate", token: "Diskontierungszins", label: "Diskontierungszins", help: "z. B. 0,05", type: "number", defaultValue: 0.05, unit: "%" },
+      { key: "holdingPeriod", token: "Haltedauer", label: "Haltedauer", help: "Jahre", type: "number", defaultValue: 10, unit: "Jahre" },
       { key: "residualValue", token: "Restwert", label: "Restwert", help: "Verkaufserlös oder Exit-Wert", type: "number", format: "money", defaultValue: 0 }
     ]
   },
@@ -142,13 +155,13 @@ export const MODEL_TEMPLATES = [
     id: "npv",
     name: "Kapitalwert / NPV",
     outputLabel: "Barwert",
-    description: "Ermittelt den Barwert der abgezinsten Zahlungsströme abzüglich Anfangsinvestition.",
+    description: "Ermittelt den Kapitalwert aus den aktiven Annahmen, dem abgezinsten Jahres-Cashflow und der Anfangsinvestition.",
     formula: "SummeAktiverParameter + (JahresCashflow / (1 + Diskontierungszins) ^ Haltedauer) - Investition",
     fields: [
-      { key: "annualCashflow", token: "JahresCashflow", label: "Jahres-Cashflow", help: "Netto-Zahlungsstrom pro Jahr", type: "number", format: "money", defaultValue: 0 },
-      { key: "discountRate", token: "Diskontierungszins", label: "Diskontierungszins", help: "z. B. 0,05", type: "number", defaultValue: 0.05 },
-      { key: "holdingPeriod", token: "Haltedauer", label: "Haltedauer", help: "Jahre", type: "number", defaultValue: 10 },
-      { key: "investment", token: "Investition", label: "Investition", help: "Anfangsinvestition", type: "number", format: "money", defaultValue: 0 }
+      { key: "annualCashflow", token: "JahresCashflow", label: "Jahres-Cashflow", help: "Netto-Zahlungsstrom pro Jahr vor Abzinsung", type: "number", format: "money", defaultValue: 0, unit: "EUR" },
+      { key: "discountRate", token: "Diskontierungszins", label: "Diskontierungszins", help: "Abzinsungssatz, z. B. 0,05", type: "number", defaultValue: 0.05, unit: "%" },
+      { key: "holdingPeriod", token: "Haltedauer", label: "Haltedauer", help: "Betrachtungszeitraum in Jahren", type: "number", defaultValue: 10, unit: "Jahre" },
+      { key: "investment", token: "Investition", label: "Investition", help: "Anfangsinvestition beziehungsweise Einstiegskapital", type: "number", format: "money", defaultValue: 0, unit: "EUR" }
     ]
   },
   {
@@ -166,9 +179,15 @@ export const MODEL_TEMPLATES = [
     id: "risk-costs",
     name: "Risikokostenmodell",
     outputLabel: "Gesamtrisiko",
-    description: "Simuliert Risiken separat und zeigt die Summe der Einzelrisiken an.",
-    formula: "Gesamtrisiko = Risiko_i",
-    fields: []
+    description: "Simuliert fünf getrennte Risiken und zeigt die Summe der Einzelrisiken an.",
+    formula: "Gesamtrisiko = Risiko_1 + Risiko_2 + Risiko_3 + Risiko_4 + Risiko_5",
+    fields: [
+      { key: "risk1", token: "Risiko_1", label: "Risiko(1)", help: "Erstes Einzelrisiko", type: "number", format: "money", defaultValue: 0 },
+      { key: "risk2", token: "Risiko_2", label: "Risiko(2)", help: "Zweites Einzelrisiko", type: "number", format: "money", defaultValue: 0 },
+      { key: "risk3", token: "Risiko_3", label: "Risiko(3)", help: "Drittes Einzelrisiko", type: "number", format: "money", defaultValue: 0 },
+      { key: "risk4", token: "Risiko_4", label: "Risiko(4)", help: "Viertes Einzelrisiko", type: "number", format: "money", defaultValue: 0 },
+      { key: "risk5", token: "Risiko_5", label: "Risiko(5)", help: "Fünftes Einzelrisiko", type: "number", format: "money", defaultValue: 0 }
+    ]
   },
   {
     id: "risk-value",
@@ -227,7 +246,7 @@ export const MODEL_TEMPLATES = [
     description: "Setzt die Jahresnettomiete mit einem Vervielfältiger ins Verhältnis.",
     formula: "Immobilienwert = Jahresnettomiete * Vervielfaeltiger",
     fields: [
-      { key: "annualNetRent", token: "Jahresnettomiete", label: "Jahresnettomiete", help: "Jährliche Nettomiete", type: "number", format: "money", defaultValue: 0 },
+      { key: "annualNetRent", token: "Jahresnettomiete", label: "Jahresnettomiete", help: "Jährliche Nettomiete", type: "number", format: "money", defaultValue: 0, unit: "EUR" },
       { key: "multiplier", token: "Vervielfaeltiger", label: "Vervielfältiger", help: "Ertragsfaktor", type: "number", defaultValue: 0 }
     ]
   },
@@ -235,12 +254,12 @@ export const MODEL_TEMPLATES = [
     id: "inflation",
     name: "Inflation / Preissteigerung",
     outputLabel: "Zukunftskosten",
-    description: "Schreibt Kosten über einen Zeitraum mit einer Wachstumsrate fort.",
+    description: "Schreibt Ausgangskosten über eine Laufzeit mit einer Preissteigerungsrate fort.",
     formula: "Zukunftskosten = Kosten_0 * (1 + i) ^ n",
     fields: [
-      { key: "initialCosts", token: "Kosten_0", label: "Kosten 0", help: "Ausgangskosten", type: "number", format: "money", defaultValue: 0 },
-      { key: "inflationRate", token: "i", label: "i", help: "Preissteigerung / Inflation", type: "number", defaultValue: 0 },
-      { key: "years", token: "n", label: "n", help: "Anzahl Jahre", type: "number", defaultValue: 0 }
+      { key: "initialCosts", token: "Kosten_0", label: "Ausgangskosten (K0)", help: "Ausgangskosten vor Preissteigerung", type: "number", format: "money", defaultValue: 0, unit: "EUR" },
+      { key: "inflationRate", token: "i", label: "Preissteigerungsrate (i, %)", help: "Preissteigerungs- beziehungsweise Inflationsrate", type: "number", defaultValue: 0, unit: "%" },
+      { key: "years", token: "n", label: "Laufzeit (n, Jahre)", help: "Betrachtungszeitraum in Jahren", type: "number", defaultValue: 0, unit: "Jahre" }
     ]
   },
   {
@@ -250,9 +269,9 @@ export const MODEL_TEMPLATES = [
     description: "Leitet Finanzierungskosten aus Kapital, Zinssatz und Laufzeit ab.",
     formula: "Zinskosten = Kapital * Zinssatz * Laufzeit",
     fields: [
-      { key: "capital", token: "Kapital", label: "Kapital", help: "Eingesetztes Fremd- oder Eigenkapital", type: "number", format: "money", defaultValue: 0 },
-      { key: "interestRate", token: "Zinssatz", label: "Zinssatz", help: "z. B. 0,05", type: "number", defaultValue: 0.05 },
-      { key: "term", token: "Laufzeit", label: "Laufzeit", help: "Zeitraum in Jahren", type: "number", defaultValue: 0 }
+      { key: "capital", token: "Kapital", label: "Kapital", help: "Eingesetztes Fremd- oder Eigenkapital", type: "number", format: "money", defaultValue: 0, unit: "EUR" },
+      { key: "interestRate", token: "Zinssatz", label: "Zinssatz", help: "z. B. 0,05", type: "number", defaultValue: 0.05, unit: "%" },
+      { key: "term", token: "Laufzeit", label: "Laufzeit", help: "Zeitraum in Jahren", type: "number", defaultValue: 0, unit: "Jahre" }
     ]
   }
 ];
@@ -277,8 +296,8 @@ export const FORMULA_LIBRARY = [
   },
   {
     title: "Risikokostenmodell",
-    formula: "Gesamtrisiko = Σ Risiko_i",
-    note: "Risiken werden separat simuliert und als Summe der Einzelrisiken ausgewiesen."
+    formula: "Gesamtrisiko = Risiko_1 + Risiko_2 + Risiko_3 + Risiko_4 + Risiko_5",
+    note: "Fünf getrennte Risiken werden separat bewertet und anschließend zusammengefasst."
   },
   {
     title: "Gesamtbudget",
@@ -389,8 +408,8 @@ export const FORMULA_LIBRARY_GROUPS = [
   {
     templateId: "risk-costs",
     title: "Risikokostenmodell",
-    formula: "Gesamtrisiko = Σ Risiko_i",
-    note: "Risiken werden separat simuliert und als Summe der Einzelrisiken ausgewiesen."
+    formula: "Gesamtrisiko = Risiko_1 + Risiko_2 + Risiko_3 + Risiko_4 + Risiko_5",
+    note: "Fünf getrennte Risiken werden separat bewertet und anschließend zusammengefasst."
   },
   {
     templateId: "risk-value",
@@ -402,7 +421,7 @@ export const FORMULA_LIBRARY_GROUPS = [
     templateId: "inflation",
     title: "Inflation / Preissteigerung",
     formula: "Zukunftskosten = Kosten_0 · (1 + i)^n",
-    note: "Preisfortschreibung über eine Laufzeit."
+    note: "Preisfortschreibung von Ausgangskosten mit Preissteigerungsrate über eine Laufzeit."
       }
     ]
   },
