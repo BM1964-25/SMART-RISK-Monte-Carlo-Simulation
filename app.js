@@ -1,7 +1,8 @@
 import { loadState, saveState, clearState } from "./storage.js?v=20260509-3";
-import { runMonteCarlo, compareScenarios, buildHistogram, formatNumber, percentile } from "./simulation.js?v=20260509-7";
+import { runMonteCarlo, compareScenarios } from "./simulation.js?v=20260510-19";
+import { buildHistogram, formatNumber, percentile } from "./statistics.js?v=20260510-3";
 import { exportStateAsJson, exportResultsAsCsv, downloadTemplate } from "./export.js?v=20260509-3";
-import { MODEL_TEMPLATES, FORMULA_TOKENS, FORMULA_LIBRARY_GROUPS, getModelTemplate } from "./models.js?v=20260509-7";
+import { MODEL_TEMPLATES, FORMULA_TOKENS, FORMULA_LIBRARY_GROUPS, getModelTemplate } from "./models.js?v=20260510-17";
 import { validateFormula, localizeFormula, stripFormulaAssignment, evaluateFormula, createFormulaPlaceholderKey } from "./formula.js?v=20260509-3";
 
 const STORAGE_BASENAME = "smart-risk-monte-carlo";
@@ -406,13 +407,19 @@ function updateCollectionItem(collection, id, field, target, shouldRender = true
   const item = items.find((entry) => entry.id === id);
   if (!item) return;
   const value = target.type === "checkbox" ? target.checked : target.value;
-  item[field] = coerceValue(field, value, target);
+  item[field] = coerceValue(collection, item, field, value, target);
   if (shouldRender) scheduleRender();
   scheduleSave();
 }
 
-function coerceValue(field, value, target) {
+function coerceValue(collection, item, field, value, target) {
   if (target.type === "checkbox") return Boolean(value);
+  if (target.dataset?.stateFormat === "percent") {
+    return value === "" ? "" : normalizePercentInput(value);
+  }
+  if (collection === "parameters" && inferParameterUnitKind(item) === "percent") {
+    return value === "" ? "" : normalizePercentInput(value);
+  }
   if (target.type === "number" || ["min", "mode", "max", "probability", "minImpact", "modeImpact", "maxImpact", "timeImpact", "parameterMultiplier", "riskProbabilityMultiplier", "riskImpactMultiplier", "iterations", "budget"].includes(field)) {
     return value === "" ? "" : toNumeric(value);
   }
@@ -421,8 +428,14 @@ function coerceValue(field, value, target) {
 
 function coerceStateValue(path, value, target) {
   if (target.type === "checkbox") return Boolean(value);
+  if (target.dataset?.stateFormat === "percent") {
+    return value === "" ? 0 : normalizePercentInput(value);
+  }
   if (target.dataset?.stateFormat === "money") {
     return value === "" ? 0 : toNumeric(value);
+  }
+  if (isPercentPath(path)) {
+    return value === "" ? 0 : normalizePercentInput(value);
   }
   if (["settings.iterations", "settings.budget"].includes(path)) {
     return value === "" ? 0 : toNumeric(value);
@@ -898,20 +911,29 @@ function renderModelSection() {
 
   const renderTokenButton = (token, extraClass = "") => {
     const active = isTokenActiveInExpression(model.formula, token.token);
-    return `<button class="chip ${extraClass} ${active ? "is-active" : ""}" data-action="insert-token" data-token="${escapeAttr(token.token)}" title="${escapeAttr(token.label)}">${escapeHtml(token.token)}</button>`;
+    const displayLabel = token.label || token.token;
+    return `<button class="chip ${extraClass} ${active ? "is-active" : ""}" data-action="insert-token" data-token="${escapeAttr(token.token)}" title="${escapeAttr(token.token)}">${escapeHtml(displayLabel)}</button>`;
   };
 
-  const staticTokenButtons = (FORMULA_TOKENS || []).map((token) => renderTokenButton(token)).join("");
+  const staticTokenButtons = [...(FORMULA_TOKENS || [])]
+    .sort((a, b) => String(a.label || a.token || "").localeCompare(String(b.label || b.token || ""), "de"))
+    .map((token) => renderTokenButton(token))
+    .join("");
 
   const templateFieldCards = editableSpecs.length
     ? editableSpecs.map((spec) => {
       const value = model?.[spec.key];
       const resolvedValue = Number.isFinite(toNumeric(value)) ? value : (spec.defaultValue ?? "");
-      const displayValue = spec.format === "money" ? formatMoneyInput(resolvedValue) : resolvedValue;
-      const help = spec.format === "money" && spec.help ? `${spec.help} (in €)` : (spec.help || "");
-      return spec.format === "money"
-        ? moneyField(spec.label, `model.${spec.key}`, displayValue, help)
-        : field(spec.label, `model.${spec.key}`, displayValue, spec.type || "number", help);
+      const unitKind = inferFieldUnitKind(spec);
+      const displayValue = unitKind === "money"
+        ? formatMoneyInput(resolvedValue)
+        : unitKind === "percent"
+          ? formatPercentInput(resolvedValue)
+          : resolvedValue;
+      const help = unitKind === "money" && spec.help ? `${spec.help} (in €)` : (spec.help || "");
+      if (unitKind === "money") return moneyField(spec.label, `model.${spec.key}`, displayValue, help);
+      if (unitKind === "percent") return percentField(spec.label, `model.${spec.key}`, displayValue, help);
+      return field(spec.label, `model.${spec.key}`, displayValue, spec.type || "number", help);
     }).join("")
     : `<div class="field" style="grid-column: 1 / -1;"><div class="field-help">Für dieses Modell sind keine zusätzlichen Eingabewerte erforderlich. Die Formel arbeitet mit den aktiven Formelbausteinen und den Daten aus den Unsicherheiten.</div></div>`;
 
@@ -926,10 +948,12 @@ function renderModelSection() {
         <span>${escapeHtml(`${group.items.length} Modelle`)}</span>
       </article>
     `).join("");
-    formulaLibraryItems = (FORMULA_LIBRARY_GROUPS || []).flatMap((group) => group.items || []).map((item) => {
-      const expression = stripFormulaAssignment(item.formula);
-      const isActive = activeTemplateId && activeTemplateId === String(item.templateId || "");
-      return `
+    formulaLibraryItems = (FORMULA_LIBRARY_GROUPS || [])
+      .flatMap((group) => (group.items || []).slice().sort((a, b) => String(a.title || "").localeCompare(String(b.title || ""), "de")))
+      .map((item) => {
+        const expression = stripFormulaAssignment(item.formula);
+        const isActive = activeTemplateId && activeTemplateId === String(item.templateId || "");
+        return `
       <button type="button" class="formula-library-item ${isActive ? "is-active" : ""}" data-model-template="${escapeAttr(item.templateId || "")}" onclick="window.smartRiskApplyModelTemplate(this.dataset.modelTemplate)" aria-pressed="${isActive ? "true" : "false"}" title="${escapeAttr(item.note)}">
         <span class="formula-library-badge">Vorlage</span>
         <strong>${escapeHtml(item.title)}</strong>
@@ -937,7 +961,7 @@ function renderModelSection() {
         <span>${escapeHtml(item.note)}</span>
       </button>
     `;
-    }).join("");
+      }).join("");
   } catch (error) {
     console.error("formulaLibraryGroups failed", error);
     formulaLibraryHeaders = `<div class="muted">Formelbibliothek konnte nicht geladen werden.</div>`;
@@ -1073,19 +1097,23 @@ function renderParameterTable() {
   const visibleParameters = Array.isArray(state.parameters) ? state.parameters : [];
   const rows = visibleParameters.map((parameter) => {
     const validation = validateParameter(parameter);
+    const unitKind = inferParameterUnitKind(parameter);
+    const inputClass = unitKind === "money" ? "money-input" : unitKind === "percent" ? "percent-input" : "number-input";
+    const formatValue = (value) => formatParameterInputValue(parameter, value);
+    const stateFormatAttr = unitKind === "percent" ? ' data-state-format="percent"' : unitKind === "money" ? ' data-state-format="money"' : "";
     return `
       <tr class="${validation.valid ? "" : "invalid"}">
         <td>
           <input data-collection="parameters" data-id="${parameter.id}" data-field="label" value="${escapeAttr(parameter.label)}" placeholder="Formelbaustein" />
         </td>
         <td>
-          <input class="money-input" type="text" inputmode="decimal" data-collection="parameters" data-id="${parameter.id}" data-field="min" value="${escapeAttr(formatMoneyInput(parameter.min))}" />
+          <input class="${inputClass}" type="text" inputmode="decimal" data-collection="parameters" data-id="${parameter.id}" data-field="min"${stateFormatAttr} value="${escapeAttr(formatValue(parameter.min))}" />
         </td>
         <td>
-          <input class="money-input" type="text" inputmode="decimal" data-collection="parameters" data-id="${parameter.id}" data-field="mode" value="${escapeAttr(formatMoneyInput(parameter.mode))}" />
+          <input class="${inputClass}" type="text" inputmode="decimal" data-collection="parameters" data-id="${parameter.id}" data-field="mode"${stateFormatAttr} value="${escapeAttr(formatValue(parameter.mode))}" />
         </td>
         <td>
-          <input class="money-input" type="text" inputmode="decimal" data-collection="parameters" data-id="${parameter.id}" data-field="max" value="${escapeAttr(formatMoneyInput(parameter.max))}" />
+          <input class="${inputClass}" type="text" inputmode="decimal" data-collection="parameters" data-id="${parameter.id}" data-field="max"${stateFormatAttr} value="${escapeAttr(formatValue(parameter.max))}" />
         </td>
         <td>
           <select data-collection="parameters" data-id="${parameter.id}" data-field="distribution">
@@ -1093,6 +1121,7 @@ function renderParameterTable() {
             ${selectOption("uniform", "Gleich", parameter.distribution)}
             ${selectOption("normal", "Normal", parameter.distribution)}
             ${selectOption("beta-pert", "Beta-PERT", parameter.distribution)}
+            ${selectOption("lognormal", "Lognormal", parameter.distribution)}
           </select>
         </td>
         <td><input type="checkbox" data-collection="parameters" data-id="${parameter.id}" data-field="active" ${parameter.active !== false ? "checked" : ""} /></td>
@@ -1109,41 +1138,48 @@ function renderParameterTable() {
     <div class="info-grid">
       <article class="info-chip">
         <strong>Dreieck</strong>
-        <span>Lineare Verteilung zwischen Minimum, Modus und Maximum.</span>
+        <span>Gut für grobe Schätzungen mit Min, Modus und Max.</span>
       </article>
       <article class="info-chip">
         <strong>Gleich</strong>
-        <span>Alle Werte zwischen Minimum und Maximum sind gleich wahrscheinlich.</span>
+        <span>Wenn nur eine Spannweite bekannt ist und keine Mitte feststeht.</span>
       </article>
       <article class="info-chip">
         <strong>Normal</strong>
-        <span>Symmetrische Verteilung um den wahrscheinlichsten Wert mit Streuung.</span>
+        <span>Für symmetrische Größen mit vielen Beobachtungen rund um den Mittelwert.</span>
       </article>
       <article class="info-chip">
         <strong>Beta-PERT</strong>
-        <span>Glättet die Dreiecksverteilung und gewichtet den wahrscheinlichsten Wert stärker.</span>
+        <span>Wenn der wahrscheinlichste Wert stärker gewichtet werden soll als die Ränder.</span>
+      </article>
+      <article class="info-chip">
+        <strong>Lognormal</strong>
+        <span>Für positive, rechtsschiefe Werte mit wenigen großen Ausreißern.</span>
       </article>
     </div>
   `;
   elements.parametersTable.innerHTML = `
-    <div class="register-summary">
-      <div class="register-stat"><strong>${summary.total}</strong><span>Formelbausteine gesamt</span></div>
-      <div class="register-stat"><strong>${summary.active}</strong><span>Aktiv</span></div>
-      <div class="register-stat"><strong>${summary.invalid}</strong><span>Ungültig</span></div>
-      <div class="register-stat"><strong>${summary.inactive}</strong><span>Inaktiv</span></div>
+    <div class="register-wrapper card-soft">
+      <div class="toolbar-label">Bandbreitenparameter</div>
+      <div class="register-summary">
+        <div class="register-stat"><strong>${summary.total}</strong><span>Formelbausteine gesamt</span></div>
+        <div class="register-stat"><strong>${summary.active}</strong><span>Aktiv</span></div>
+        <div class="register-stat"><strong>${summary.invalid}</strong><span>Ungültig</span></div>
+        <div class="register-stat"><strong>${summary.inactive}</strong><span>Inaktiv</span></div>
+      </div>
+      <div class="register-meta">
+        <div class="toolbar-label">Verteilungs-Hinweis</div>
+        ${distributionInfo}
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Formelbaustein</th><th>Min</th><th>Wahrsch. Wert</th><th>Max</th><th>Verteilung</th><th>Aktiv</th><th>Aktionen</th>
+          </tr>
+        </thead>
+        <tbody>${rows || `<tr><td colspan="7" class="muted">Noch keine Parameter vorhanden.</td></tr>`}</tbody>
+      </table>
     </div>
-    <div class="register-meta card-soft">
-      <div class="toolbar-label">Verteilungs-Hinweis</div>
-      ${distributionInfo}
-    </div>
-    <table>
-      <thead>
-        <tr>
-          <th>Formelbaustein</th><th>Min</th><th>Wahrsch. Wert</th><th>Max</th><th>Verteilung</th><th>Aktiv</th><th>Aktionen</th>
-        </tr>
-      </thead>
-      <tbody>${rows || `<tr><td colspan="7" class="muted">Noch keine Parameter vorhanden.</td></tr>`}</tbody>
-    </table>
   `;
 }
 
@@ -1225,7 +1261,7 @@ function renderSimulationForm() {
   const targetFieldMarkup = meta.kind === "money"
     ? moneyField(meta.targetLabel, "settings.budget", formatMoney(state.settings.budget), meta.targetHelp)
     : meta.kind === "percent"
-      ? numericField(meta.targetLabel, "settings.budget", state.settings.budget, meta.targetHelp)
+      ? percentField(meta.targetLabel, "settings.budget", formatPercentInput(state.settings.budget), meta.targetHelp)
       : `
         <div class="field">
           <label for="simulation-target-value">${meta.targetLabel}</label>
@@ -1740,10 +1776,17 @@ function validateAll() {
 }
 
 function validateParameter(parameter) {
-  const min = toNumeric(parameter.min);
-  const mode = toNumeric(parameter.mode);
-  const max = toNumeric(parameter.max);
+  const unitKind = inferParameterUnitKind(parameter);
+  const min = normalizeValueForValidation(parameter.min, unitKind);
+  const mode = normalizeValueForValidation(parameter.mode, unitKind);
+  const max = normalizeValueForValidation(parameter.max, unitKind);
   if (![min, mode, max].every(Number.isFinite)) {
+    if (unitKind === "percent") {
+      return { valid: false, message: "Prozentwerte bitte als Zahl eingeben, z. B. 1,9 für 1,9 %." };
+    }
+    if (unitKind === "time") {
+      return { valid: false, message: "Zeitwerte bitte als Zahl in Jahren oder der gewählten Einheit eingeben." };
+    }
     return { valid: false, message: "Alle Zahlenfelder müssen numerisch sein." };
   }
   if (min > mode) return { valid: false, message: "Minimalwert darf nicht größer sein als der wahrscheinlichste Wert." };
@@ -1762,6 +1805,23 @@ function validateRisk(risk) {
   if (min > mode) return { valid: false, message: "Minimale Kostenwirkung darf nicht größer sein als die wahrscheinlichste." };
   if (mode > max) return { valid: false, message: "Wahrscheinlichste Kostenwirkung darf nicht größer sein als die maximale." };
   return { valid: true, message: "" };
+}
+
+function normalizeValueForValidation(value, unitKind) {
+  const numeric = toNumeric(value);
+  if (!Number.isFinite(numeric)) return numeric;
+  if (unitKind === "percent") {
+    return Math.abs(numeric) > 1 ? numeric / 100 : numeric;
+  }
+  return numeric;
+}
+
+function normalizeModelFieldValue(fieldDef, rawValue, unitKind = inferFieldUnitKind(fieldDef)) {
+  const numeric = toNumeric(rawValue);
+  const resolvedValue = Number.isFinite(numeric) ? numeric : (fieldDef?.defaultValue ?? 0);
+  return unitKind === "percent" || isPercentPath(fieldDef?.key)
+    ? normalizePercentInput(resolvedValue)
+    : resolvedValue;
 }
 
 function toNumeric(value) {
@@ -1830,6 +1890,25 @@ function moneyField(label, stateField, value, help = "", scenarioId = "") {
         id="${sanitizeId(stateField)}"
         data-state-field="${stateField}"
         data-state-format="money"
+        ${attr}
+        type="text"
+        inputmode="decimal"
+        value="${escapeAttr(value)}"
+      />
+      ${help ? `<div class="field-help">${help}</div>` : ""}
+    </div>
+  `.replace(/\s+/g, " ");
+}
+
+function percentField(label, stateField, value, help = "", scenarioId = "") {
+  const attr = scenarioId ? `data-scenario-id="${scenarioId}"` : "";
+  return `
+    <div class="field">
+      <label for="${sanitizeId(stateField)}">${label}</label>
+      <input
+        id="${sanitizeId(stateField)}"
+        data-state-field="${stateField}"
+        data-state-format="percent"
         ${attr}
         type="text"
         inputmode="decimal"
@@ -1970,6 +2049,7 @@ function createModelParametersFromTemplate(templateId = state.model?.templateId 
   for (const [index, spec] of specs.entries()) {
     const rawValue = Number(state.model?.[spec.key]);
     const value = Number.isFinite(rawValue) ? rawValue : Number(spec.defaultValue ?? 0);
+    const unitKind = inferParameterUnitKind(spec);
     const entry = {
       id: `PAR_MODEL_${template.id}_${spec.key || spec.token || index + 1}`,
       label: spec.label || spec.token || spec.key || `Modellwert ${index + 1}`,
@@ -1980,7 +2060,14 @@ function createModelParametersFromTemplate(templateId = state.model?.templateId 
       mode: value,
       max: value,
       distribution: "triangle",
-      unit: spec.format === "money" ? unit : (spec.unit || ""),
+      unitKind,
+      unit: unitKind === "money"
+        ? unit
+        : unitKind === "percent"
+          ? "%"
+          : unitKind === "time"
+            ? (spec.unit || "Jahre")
+            : (spec.unit || ""),
       active: true,
       comment: "Aus Bewertungsmodell übernommen"
     };
@@ -2151,8 +2238,8 @@ function buildModelValidationContext(model) {
   const modelSpecs = (templateDefinition.fields || []).length ? (templateDefinition.fields || []) : transferSpecs;
   for (const fieldDef of modelSpecs) {
     const token = fieldDef.token || fieldDef.label || fieldDef.key;
-    const numeric = toNumeric(model?.[fieldDef.key]);
-    context[token] = Number.isFinite(numeric) ? numeric : (fieldDef.defaultValue ?? 0);
+    const unitKind = inferFieldUnitKind(fieldDef);
+    context[token] = normalizeModelFieldValue(fieldDef, model?.[fieldDef.key], unitKind);
   }
   return context;
 }
@@ -2605,6 +2692,79 @@ function formatMoneyInput(value) {
   return formatMoney(value);
 }
 
+function formatPercentInput(value) {
+  if (value === "" || value === null || value === undefined) return "";
+  return formatNumber((Number(value) || 0) * 100);
+}
+
+function normalizePercentInput(value) {
+  const numeric = toNumeric(value);
+  if (!Number.isFinite(numeric)) return value;
+  return Math.abs(numeric) > 1 ? numeric / 100 : numeric;
+}
+
+function normalizePercentValue(value) {
+  const numeric = toNumeric(value);
+  if (!Number.isFinite(numeric)) return value;
+  return Math.abs(numeric) > 1 ? numeric / 100 : numeric;
+}
+
+function normalizePercentLikeValue(item, value) {
+  if (!isPercentLikeParameter(item)) return Number(value);
+  const numeric = toNumeric(value);
+  if (!Number.isFinite(numeric)) return value;
+  return Math.abs(numeric) > 1 ? numeric / 100 : numeric;
+}
+
+function formatParameterInputValue(parameter, value) {
+  const unitKind = inferParameterUnitKind(parameter);
+  if (unitKind === "money") return formatMoneyInput(value);
+  if (unitKind === "percent") return formatPercentInput(value);
+  return formatNumber(value);
+}
+
+function inferParameterUnitKind(parameter) {
+  if (parameter?.unitKind) {
+    return String(parameter.unitKind).toLowerCase();
+  }
+  const unit = String(parameter?.unit || "").toLowerCase();
+  const label = String(parameter?.label || "").toLowerCase();
+  const token = String(parameter?.formulaToken || parameter?.id || "").toLowerCase();
+  const haystack = `${unit} ${label} ${token}`;
+  if (/(%|prozent)/.test(haystack)) {
+    return "percent";
+  }
+  if (/(jahre|jahr|laufzeit|haltedauer|termin|zeit)/.test(haystack)) {
+    return "time";
+  }
+  if (/(€|eur|money|geld|kosten|wert|budget|miete|cashflow|investition|kapital|einsatz|zinskosten|jahresnettomiete|bodenwert|reinertrag|restwert|schadenshöhe|schadenhoehe|baunebenkosten|bauskosten|baukosten|kg\s?\d{3}|kg\d{3})/.test(haystack)) {
+    return "money";
+  }
+  if (/(rate|zinssatz|zins|preissteigerung|wahrscheinlichkeit|chance|quote)/.test(haystack)) {
+    return "percent";
+  }
+  return "number";
+}
+
+function isMoneyLikeParameter(parameter) {
+  return inferParameterUnitKind(parameter) === "money";
+}
+
+function isPercentLikeParameter(parameter) {
+  return inferParameterUnitKind(parameter) === "percent";
+}
+
+function inferFieldUnitKind(spec) {
+  const unit = String(spec?.unit || spec?.format || "").toLowerCase();
+  const label = String(spec?.label || "").toLowerCase();
+  const token = String(spec?.token || spec?.key || "").toLowerCase();
+  const haystack = `${unit} ${label} ${token}`;
+  if (/(%|prozent)/.test(haystack)) return "percent";
+  if (/(jahr|jahre|laufzeit|haltedauer|zeit)/.test(haystack)) return "time";
+  if (/(€|eur|money|geld|kosten|wert|budget|miete|cashflow|investition|kapital|zinskosten|jahresnettomiete|bodenwert|reinertrag|restwert|schadenshöhe|schadenhoehe|baunebenkosten|bauskosten|baukosten|kg\s?\d{3}|kg\d{3})/.test(haystack)) return "money";
+  return spec?.format === "money" ? "money" : "number";
+}
+
 function formatPercent(value) {
   return `${((Number(value) || 0) * 100).toLocaleString("de-DE", { maximumFractionDigits: 1 })} %`;
 }
@@ -2830,7 +2990,11 @@ function normalizeImportedState(incoming) {
     id: item.id || makeId("PAR", index + 1),
     formulaToken: item.formulaToken || createFormulaPlaceholderKey(item.label || item.id || `PAR_${index + 1}`, "PAR"),
     active: item.active !== false,
-    distribution: item.distribution || "triangle"
+    distribution: item.distribution || "triangle",
+    unitKind: item.unitKind || inferParameterUnitKind(item),
+    min: normalizePercentLikeValue(item, item.min),
+    mode: normalizePercentLikeValue(item, item.mode),
+    max: normalizePercentLikeValue(item, item.max)
   })).filter((item) => !String(item.id || "").startsWith("MODEL_"));
   merged.risks = merged.risks.map((item, index) => ({
     ...item,
@@ -2881,7 +3045,7 @@ function normalizeModelState(incoming, fallback) {
   const base = fallback || createDefaultModelState();
   const template = getModelTemplate(incoming?.templateId || base.templateId || "cost");
   const note = String(incoming?.note ?? base.note ?? "");
-  return {
+  const merged = {
     ...base,
     ...(incoming || {}),
     templateId: template.id,
@@ -2905,6 +3069,16 @@ function normalizeModelState(incoming, fallback) {
       : note,
     customLibrary: normalizeCustomLibrary(incoming?.customLibrary ?? base.customLibrary ?? [])
   };
+  for (const key of ["discountRate", "inflationRate", "interestRate", "capRate"]) {
+    if (key in merged) {
+      merged[key] = normalizePercentValue(merged[key]);
+    }
+  }
+  return merged;
+}
+
+function isPercentPath(path) {
+  return ["discountRate", "inflationRate", "interestRate", "capRate"].includes(String(path || ""));
 }
 
 function normalizeCustomLibrary(items) {
