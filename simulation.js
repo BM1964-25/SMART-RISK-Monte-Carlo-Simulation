@@ -1,5 +1,7 @@
-import { evaluateFormula, createFormulaContext, createFormulaPlaceholderKey } from "./formula.js?v=20260508-1";
-import { getModelTemplate } from "./models.js?v=20260509-7";
+import { evaluateFormula, createFormulaContext, createFormulaPlaceholderKey } from "./formula.js?v=20260509-3";
+import { getModelTemplate } from "./models.js?v=20260510-17";
+import { percentile, summarize, computeSensitivity } from "./statistics.js?v=20260510-3";
+import { sampleParameter, sampleRiskImpact, clamp } from "./distributions.js?v=20260510-5";
 
 export async function runMonteCarlo(state, scenarioId, onProgress = null) {
   const scenario = resolveScenario(state, scenarioId);
@@ -68,7 +70,8 @@ export async function runMonteCarlo(state, scenarioId, onProgress = null) {
     for (const fieldDef of templateDefinition.fields || []) {
       const token = fieldDef.token || fieldDef.label || fieldDef.key;
       const numeric = toNumber(model?.[fieldDef.key]);
-      context[token] = Number.isFinite(numeric) ? numeric : (fieldDef.defaultValue ?? 0);
+      const resolvedValue = Number.isFinite(numeric) ? numeric : (fieldDef.defaultValue ?? 0);
+      context[token] = isPercentField(fieldDef) ? normalizePercentLikeNumber(resolvedValue) : resolvedValue;
     }
 
     for (let index = 0; index < parameters.length; index += 1) {
@@ -187,94 +190,6 @@ export async function compareScenarios(state) {
   return results;
 }
 
-export function buildHistogram(values, bins = 24) {
-  if (!values.length) return [];
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const span = Math.max(max - min, 1);
-  const bucketWidth = span / bins;
-  const buckets = Array.from({ length: bins }, (_, index) => ({
-    x0: min + index * bucketWidth,
-    x1: min + (index + 1) * bucketWidth,
-    count: 0
-  }));
-  for (const value of values) {
-    const index = Math.min(Math.floor((value - min) / bucketWidth), bins - 1);
-    buckets[index].count += 1;
-  }
-  return buckets;
-}
-
-export function summarize(values, budget = 0) {
-  const sorted = [...values].sort((a, b) => a - b);
-  const count = sorted.length;
-  const min = count ? sorted[0] : 0;
-  const max = count ? sorted[count - 1] : 0;
-  const mean = count ? sorted.reduce((sum, value) => sum + value, 0) / count : 0;
-  const median = percentile(sorted, 0.5);
-  const sd = count ? Math.sqrt(sorted.reduce((sum, value) => sum + Math.pow(value - mean, 2), 0) / count) : 0;
-  return {
-    sorted,
-    count,
-    min,
-    max,
-    mean,
-    median,
-    sd
-  };
-}
-
-export function percentile(sortedValues, p) {
-  if (!sortedValues.length) return 0;
-  const sorted = sortedValues;
-  const index = (sorted.length - 1) * p;
-  const lower = Math.floor(index);
-  const upper = Math.ceil(index);
-  if (lower === upper) return sorted[lower];
-  const weight = index - lower;
-  return sorted[lower] * (1 - weight) + sorted[upper] * weight;
-}
-
-export function formatNumber(value) {
-  return Number(value || 0).toLocaleString("de-DE", { maximumFractionDigits: 2 });
-}
-
-export function computeCorrelationRanking(series, values, names) {
-  return computeSensitivity(series, values, names).slice(0, 10);
-}
-
-function computeSensitivity(series, values, names) {
-  const ranking = names.map((name, index) => ({
-    name,
-    correlation: pearson(series[index] || [], values)
-  }));
-  return ranking
-    .filter((item) => Number.isFinite(item.correlation))
-    .sort((a, b) => Math.abs(b.correlation) - Math.abs(a.correlation));
-}
-
-function pearson(x, y) {
-  const n = Math.min(x.length, y.length);
-  if (!n) return 0;
-  let sumX = 0;
-  let sumY = 0;
-  let sumXY = 0;
-  let sumX2 = 0;
-  let sumY2 = 0;
-  for (let i = 0; i < n; i += 1) {
-    const xi = Number(x[i]) || 0;
-    const yi = Number(y[i]) || 0;
-    sumX += xi;
-    sumY += yi;
-    sumXY += xi * yi;
-    sumX2 += xi * xi;
-    sumY2 += yi * yi;
-  }
-  const numerator = n * sumXY - sumX * sumY;
-  const denominator = Math.sqrt(Math.max(n * sumX2 - sumX * sumX, 0) * Math.max(n * sumY2 - sumY * sumY, 0));
-  return denominator === 0 ? 0 : numerator / denominator;
-}
-
 function resolveScenario(state, scenarioId) {
   const scenarios = state.scenarios || [];
   const fallback = scenarios[0] || {
@@ -334,8 +249,7 @@ function validateModelFormula(model, parameterTokens = [], riskTokens = [], para
   const templateDefinition = getModelTemplate(model.templateId || "custom");
     for (const fieldDef of templateDefinition.fields || []) {
       const token = fieldDef.token || fieldDef.label || fieldDef.key;
-      const numeric = toNumber(model?.[fieldDef.key]);
-      context[token] = Number.isFinite(numeric) ? numeric : (fieldDef.defaultValue ?? 0);
+      context[token] = normalizeTemplateFieldValue(fieldDef, model?.[fieldDef.key]);
     }
     parameterTokens.forEach((item, index) => {
       const parameter = parameters[index];
@@ -354,97 +268,10 @@ function validateModelFormula(model, parameterTokens = [], riskTokens = [], para
   return result.ok ? { ok: true, error: "" } : { ok: false, error: result.error };
 }
 
-function sampleParameter(parameter, multiplier = 1) {
-  const min = scaleValue(parameter.min, multiplier);
-  const mode = scaleValue(parameter.mode, multiplier);
-  const max = scaleValue(parameter.max, multiplier);
-  switch ((parameter.distribution || "triangle").toLowerCase()) {
-    case "uniform":
-      return sampleUniform(min, max);
-    case "normal":
-      return sampleNormal(mode, Math.abs((max - min) / 6) || Math.max(Math.abs(mode) * 0.05, 1));
-    case "beta-pert":
-    case "beta_pert":
-      return sampleBetaPert(min, mode, max);
-    case "triangle":
-    default:
-      return sampleTriangular(min, mode, max);
-  }
-}
-
-function sampleRiskImpact(risk, multiplier = 1) {
-  const cost = sampleTriangular(scaleValue(risk.minImpact, multiplier), scaleValue(risk.modeImpact, multiplier), scaleValue(risk.maxImpact, multiplier));
-  const time = toNumber(risk.timeImpact) * multiplier || 0;
-  return { cost, time };
-}
-
-function sampleTriangular(min, mode, max) {
-  min = Math.min(min, max);
-  mode = clamp(mode, min, max);
-  max = Math.max(max, min);
-  if (max === min) return min;
-  const u = Math.random();
-  const c = (mode - min) / (max - min || 1);
-  if (u <= c) {
-    return min + Math.sqrt(u * (max - min) * (mode - min));
-  }
-  return max - Math.sqrt((1 - u) * (max - min) * (max - mode));
-}
-
-function sampleUniform(min, max) {
-  min = Math.min(min, max);
-  max = Math.max(max, min);
-  return min + Math.random() * (max - min);
-}
-
-function sampleNormal(mean, sd) {
-  const u1 = Math.random() || 1e-12;
-  const u2 = Math.random() || 1e-12;
-  const z0 = Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2);
-  return Math.max(0, mean + z0 * sd);
-}
-
-function sampleBetaPert(min, mode, max) {
-  min = Number(min) || 0;
-  mode = clamp(Number(mode) || 0, min, max);
-  max = Number(max) || min;
-  if (max === min) return min;
-  const alpha = 1 + 4 * ((mode - min) / (max - min));
-  const beta = 1 + 4 * ((max - mode) / (max - min));
-  const x = betaSample(alpha, beta);
-  return min + x * (max - min);
-}
-
-function betaSample(alpha, beta) {
-  const x = gammaSample(alpha);
-  const y = gammaSample(beta);
-  return x / (x + y || 1);
-}
-
-function gammaSample(shape) {
-  if (shape < 1) {
-    const u = Math.random();
-    return gammaSample(1 + shape) * Math.pow(u, 1 / shape);
-  }
-  const d = shape - 1 / 3;
-  const c = 1 / Math.sqrt(9 * d);
-  while (true) {
-    let x;
-    let v;
-    do {
-      x = sampleNormal(0, 1);
-      v = 1 + c * x;
-    } while (v <= 0);
-    v = v * v * v;
-    const u = Math.random();
-    if (u < 1 - 0.0331 * x * x * x * x) return d * v;
-    if (Math.log(u) < 0.5 * x * x + d * (1 - v + Math.log(v))) return d * v;
-  }
-}
-
-function scaleValue(value, multiplier) {
-  const numeric = toNumber(value);
-  return numeric * multiplier;
+function normalizeTemplateFieldValue(fieldDef, rawValue) {
+  const numeric = toNumber(rawValue);
+  const resolvedValue = Number.isFinite(numeric) ? numeric : (fieldDef?.defaultValue ?? 0);
+  return isPercentField(fieldDef) ? normalizePercentLikeNumber(resolvedValue) : resolvedValue;
 }
 
 function resolveFormulaKey(item, index, fallbackPrefix) {
@@ -458,8 +285,17 @@ function toNumber(value) {
   return Number(value);
 }
 
-function clamp(value, min, max) {
-  return Math.min(Math.max(value, min), max);
+function isPercentField(fieldDef) {
+  const unit = String(fieldDef?.unit || fieldDef?.format || "").toLowerCase();
+  const label = String(fieldDef?.label || "").toLowerCase();
+  const token = String(fieldDef?.token || fieldDef?.key || "").toLowerCase();
+  return /(%|prozent)/.test(`${unit} ${label} ${token}`);
+}
+
+function normalizePercentLikeNumber(value) {
+  const numeric = toNumber(value);
+  if (!Number.isFinite(numeric)) return value;
+  return Math.abs(numeric) > 1 ? numeric / 100 : numeric;
 }
 
 function isActiveItem(item) {
