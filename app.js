@@ -1824,6 +1824,16 @@ function normalizeModelFieldValue(fieldDef, rawValue, unitKind = inferFieldUnitK
     : resolvedValue;
 }
 
+function normalizePercentModelState(model) {
+  const normalized = { ...(model || {}) };
+  for (const key of ["discountRate", "inflationRate", "interestRate", "capRate"]) {
+    if (key in normalized) {
+      normalized[key] = normalizePercentInput(normalized[key]);
+    }
+  }
+  return normalized;
+}
+
 function toNumeric(value) {
   if (value === "" || value === null || value === undefined) return NaN;
   const normalized = String(value)
@@ -2008,13 +2018,13 @@ function getSortedModelTemplates() {
 
 function resolveCurrentModel() {
   const template = getModelTemplate(state.model?.templateId || "cost");
-  return {
+  return normalizePercentModelState({
     ...template,
     ...(state.model || {}),
     templateId: state.model?.templateId || template.id,
     formula: String(state.model?.formula || template.formula || ""),
     outputLabel: state.model?.outputLabel || template.outputLabel
-  };
+  });
 }
 
 function applyModelTemplate(templateId) {
@@ -2240,6 +2250,15 @@ function buildModelValidationContext(model) {
     const token = fieldDef.token || fieldDef.label || fieldDef.key;
     const unitKind = inferFieldUnitKind(fieldDef);
     context[token] = normalizeModelFieldValue(fieldDef, model?.[fieldDef.key], unitKind);
+  }
+  for (const key of ["discountRate", "inflationRate", "interestRate", "capRate"]) {
+    if (key in model) {
+      const normalized = normalizePercentInput(model[key]);
+      context[key] = normalized;
+      if (key === "inflationRate") {
+        context.i = normalized;
+      }
+    }
   }
   return context;
 }
@@ -3045,7 +3064,7 @@ function normalizeModelState(incoming, fallback) {
   const base = fallback || createDefaultModelState();
   const template = getModelTemplate(incoming?.templateId || base.templateId || "cost");
   const note = String(incoming?.note ?? base.note ?? "");
-  const merged = {
+  const merged = normalizePercentModelState({
     ...base,
     ...(incoming || {}),
     templateId: template.id,
@@ -3068,7 +3087,7 @@ function normalizeModelState(incoming, fallback) {
         ? note.replace("verfügbaren Platzhalter", "verfügbaren Formelbausteine")
       : note,
     customLibrary: normalizeCustomLibrary(incoming?.customLibrary ?? base.customLibrary ?? [])
-  };
+  });
   for (const key of ["discountRate", "inflationRate", "interestRate", "capRate"]) {
     if (key in merged) {
       merged[key] = normalizePercentValue(merged[key]);
